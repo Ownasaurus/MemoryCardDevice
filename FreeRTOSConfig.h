@@ -88,7 +88,7 @@ supported, or if both static and dynamic allocation are supported. */
 /* Note heap_5.c is used so this only defines the part of the heap that is in
 the first block of RAM on the LPC device.  See the initialization of the heap
 in main.c. */
-#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 60 * 1024 ) )
+#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 100 * 1024 ) )
 
 /* Constants that build features in or out. */
 #define configUSE_MUTEXES						1
@@ -110,7 +110,7 @@ in main.c. */
 #define configCHECK_FOR_STACK_OVERFLOW			0
 //void vMainAssertCalled( const char *pcFileName, uint32_t ulLineNumber );
 //#define configASSERT( x ) if( ( x ) == 0 ) { vMainAssertCalled( __FILE__, __LINE__ ); }
-#define configASSERT(x) ASSERT(x)
+#define configASSERT(x) if( x == 0 ) { taskDISABLE_INTERRUPTS(); for(;;); }
 #define configQUEUE_REGISTRY_SIZE				0
 
 /* Software timer definitions. */

@@ -66,8 +66,8 @@ extern "C"
 #include "lwip/mem.h"
 #include "lwip/stats.h"
 #include "lwip/def.h"
-#include "lwip/tcp_impl.h"
-#include "lwip/timers.h"
+#include "lwip/ip_addr.h"
+#include "netif/tivaif.h"
 
 //*****************************************************************************
 //

@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include "FreeRTOS.h"
+#include "utils/uartstdio.h"
 
 //*****************************************************************************
 //
@@ -59,6 +60,7 @@ extern uint32_t __STACK_TOP;
 extern void xPortPendSVHandler(void);
 extern void vPortSVCHandler(void);
 extern void xPortSysTickHandler(void);
+extern void lwIPEthernetIntHandler(void);
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
@@ -126,7 +128,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // I2C1 Master and Slave
     IntDefaultHandler,                      // CAN0
     IntDefaultHandler,                      // CAN1
-    IntDefaultHandler,                      // Ethernet
+    lwIPEthernetIntHandler,                 // Ethernet
     IntDefaultHandler,                      // Hibernate
     IntDefaultHandler,                      // USB0
     IntDefaultHandler,                      // PWM Generator 3
@@ -241,6 +243,31 @@ NmiSR(void)
     }
 }
 
+enum { r0, r1, r2, r3, r12, lr, pc, psr};
+
+void Hard_Fault_Handler(uint32_t stack[])
+{
+   /*UARTprintf("r0  = 0x%08lx\n", stack[r0]);
+   UARTprintf("r1  = 0x%08lx\n", stack[r1]);
+   UARTprintf("r2  = 0x%08lx\n", stack[r2]);
+   UARTprintf("r3  = 0x%08lx\n", stack[r3]);
+   UARTprintf("r12 = 0x%08lx\n", stack[r12]);
+   UARTprintf("lr  = 0x%08lx\n", stack[lr]);
+   UARTprintf("pc  = 0x%08lx\n", stack[pc]);
+   UARTprintf("psr = 0x%08lx\n", stack[psr]);*/
+    UARTprintf("***CRASH. Register log:\n", stack[r0]);
+    UARTprintf("r0  = 0x%p\n", stack[r0]);
+    UARTprintf("r1  = 0x%p\n", stack[r1]);
+    UARTprintf("r2  = 0x%p\n", stack[r2]);
+    UARTprintf("r3  = 0x%p\n", stack[r3]);
+    UARTprintf("r12 = 0x%p\n", stack[r12]);
+    UARTprintf("lr  = 0x%p\n", stack[lr]);
+    UARTprintf("pc  = 0x%p\n", stack[pc]);
+    UARTprintf("psr = 0x%p\n", stack[psr]);
+   __asm volatile(" BKPT #1\n"); // the space before BKPT is MANDATORY or Code Composer Studio gets mad
+   while(1);
+}
+
 //*****************************************************************************
 //
 // This is the code that gets called when the processor receives a fault
@@ -251,6 +278,10 @@ NmiSR(void)
 static void
 FaultISR(void)
 {
+    asm volatile(
+              " mrs r0,msp    \n"
+              " b Hard_Fault_Handler \n"
+          );
     //
     // Enter an infinite loop.
     //

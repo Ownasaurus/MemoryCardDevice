@@ -18,6 +18,9 @@
 #include "driverlib/gpio.h"
 #include "inc/hw_memmap.h"
 #include "inc/tm4c1294ncpdt.h"
+#define FAULT_SYSTICK           15          // System Tick, instead of including all of "inc/hw_ints.h"
+#define GPIO_PF0_EN0LED0        0x00050005
+#define GPIO_PF4_EN0LED1        0x00051005
 
 // FreeRTOS
 #include "FreeRTOSConfig.h"
@@ -26,25 +29,32 @@
 #include "queue.h"
 #include "message_buffer.h"
 
+// lwIP
+#include "utils/lwiplib.h"
+//#define FAULT_SYSTICK           15          // System Tick, instead of including all of "inc/hw_ints.h"
+
 // Other
 //#include "SSI3DMASlave.h"
 #include "DataPackage.h"
 
 // Task function prototypes
-//void ethernetTask(void *pvParameters);
+void ethernetTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void uart0Task(void *pvParameters);
 //void EXISendTask(void *pvParameters);
 
 // Other function prototypes
 void UART0_Begin();
-//void Ethernet_Begin();
+void Ethernet_Begin();
 void task_print(char* fmt, ...);
 
 // FreeRTOS data structures
 QueueHandle_t incomingEXIData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
+
+#define SYSTICK_INT_PRIORITY    0xE0 // priority 7
+#define ETHERNET_INT_PRIORITY   0xC0 // priority 6
 
 int main(void)
 {
@@ -68,14 +78,204 @@ int main(void)
     // Create tasks
     xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
     xTaskCreate(uart0Task, (const portCHAR *)"UART0", 1024, NULL, 2, NULL);
-    //xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 4096, NULL, 4, NULL);
-    //xTaskCreate(EXISendTask, (const portCHAR *)"EXDataPackage.hI", 4096, NULL, 5, NULL);
+    xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 4096, NULL, 4, NULL);
+    //xTaskCreate(EXISendTask, (const portCHAR *)"EXI", 4096, NULL, 5, NULL);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
 
     // Code should never reach this point
     return 0;
+}
+
+// Initialize Ethernet
+// Example initialization code provided by Texas Instruments
+void Ethernet_Begin()
+{
+    uint32_t ui32User0, ui32User1;
+    uint8_t pui8MACArray[8];
+
+    //
+    // this app wants to configure for ethernet LED function.
+    //
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    ROM_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
+    ROM_GPIOPinConfigure(GPIO_PF4_EN0LED1);
+
+    GPIOPinTypeEthernetLED(GPIO_PORTF_BASE, GPIO_PIN_0 | GPIO_PIN_4);
+
+    //
+    // Configure Port N1 for as an output for the animation LED.
+    //
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
+    MAP_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
+
+    //
+    // Initialize LED to OFF (0)
+    //
+    MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, ~GPIO_PIN_1);
+
+    //
+    // Configure SysTick for a periodic interrupt.
+    //
+    // NOTE: This is already handled by the RTOS
+
+    //
+    // Configure the hardware MAC address for Ethernet Controller filtering of
+    // incoming packets.  The MAC address will be stored in the non-volatile
+    // USER0 and USER1 registers.
+    //
+    MAP_FlashUserGet(&ui32User0, &ui32User1);
+    if((ui32User0 == 0xffffffff) || (ui32User1 == 0xffffffff))
+    {
+        //
+        // We should never get here.  This is an error if the MAC address has
+        // not been programmed into the device.  Exit the program.
+        // Let the user know there is no MAC address
+        //
+        UARTprintf("No MAC programmed!\n");
+        while(1)
+        {
+        }
+    }
+
+    //
+    // Tell the user what we are doing just now.
+    //
+    //UARTprintf("Waiting for IP.\n");
+
+    //
+    // Convert the 24/24 split MAC address from NV ram into a 32/16 split MAC
+    // address needed to program the hardware registers, then program the MAC
+    // address into the Ethernet Controller registers.
+    //
+    pui8MACArray[0] = ((ui32User0 >>  0) & 0xff);
+    pui8MACArray[1] = ((ui32User0 >>  8) & 0xff);
+    pui8MACArray[2] = ((ui32User0 >> 16) & 0xff);
+    pui8MACArray[3] = ((ui32User1 >>  0) & 0xff);
+    pui8MACArray[4] = ((ui32User1 >>  8) & 0xff);
+    pui8MACArray[5] = ((ui32User1 >> 16) & 0xff);
+
+    uint32_t localip = 0xC0A800CD; // 192.168.0.205
+    uint32_t netmask = 0xFFFFFF00;
+    uint32_t gateway = 0;
+
+    //
+    // Initialize the lwIP library, using DHCP.
+    //
+    //lwIPInit(SYSTEM_CLOCK, pui8MACArray, 0, 0, 0, IPADDR_USE_DHCP);
+
+    // Static lwIP Initialization
+    lwIPInit(SYSTEM_CLOCK, pui8MACArray, localip, netmask, gateway, IPADDR_USE_STATIC);
+
+    //
+    // Set the interrupt priorities.  We set the SysTick interrupt to a higher
+    // priority than the Ethernet interrupt to ensure that the file system
+    // tick is processed if SysTick occurs while the Ethernet handler is being
+    // processed.  This is very likely since all the TCP/IP and HTTP work is
+    // done in the context of the Ethernet interrupt.
+    //
+    MAP_IntPrioritySet(INT_EMAC0, ETHERNET_INT_PRIORITY);
+    MAP_IntPrioritySet(FAULT_SYSTICK, SYSTICK_INT_PRIORITY);
+}
+
+// Callback when UDP data is received
+// NOTE: The callback function is responsible for deallocating the pbuf, but we pass this along to the EXISendTask function
+void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
+{
+    // pass the byte pbuf to EXISendTask
+    //BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    task_print(p->payload);
+    //xQueueSendFromISR(outgoingEXIData, &p, &xHigherPriorityTaskWoken); //send to our exi send task.
+    pbuf_free(p); // previously-deferred free
+}
+
+//*****************************************************************************
+//
+// Display an lwIP type IP Address.
+//
+//*****************************************************************************
+void
+DisplayIPAddress(uint32_t ui32Addr)
+{
+    char pcBuf[16];
+
+    //
+    // Convert the IP Address into a string.
+    //
+    usprintf(pcBuf, "%d.%d.%d.%d", ui32Addr & 0xff, (ui32Addr >> 8) & 0xff,
+            (ui32Addr >> 16) & 0xff, (ui32Addr >> 24) & 0xff);
+
+    //
+    // Display the string.
+    //
+    xQueueSend(printableData, pcBuf, 0);
+}
+
+// Task which handles all outgoing UDP communication
+#pragma diag_suppress=112 // suppress the warning that the last line cannot be reached.
+void ethernetTask(void *pvParameters)
+{
+    Ethernet_Begin();
+    task_print("Ethernet Initialized.\r\n");
+
+    //--------Wait until we have our IP-----------
+    uint32_t currIp = lwIPLocalIPAddrGet();
+    while(currIp == 0xFFFFFFFF || currIp == 0)
+    {
+        task_print("Waiting for IP....\r\n");
+        currIp = lwIPLocalIPAddrGet();
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+
+    task_print("Obtained IP: ");
+    DisplayIPAddress(currIp);
+    task_print("\r\n");
+    //--------------------------------------------
+
+    struct udp_pcb *pcb_send, *pcb_receive;
+    struct pbuf *p;
+    DataPackage_t datapackage;
+
+    pcb_send = udp_new();
+    configASSERT(pcb_send != NULL);
+
+    if(udp_connect(pcb_send, IP_ADDR_BROADCAST, 55559) != ERR_OK)
+    {
+        task_print("ERROR: Failed to CONNECT!\r\n");
+        while(1);
+    }
+
+    pcb_receive = udp_new();
+    configASSERT(pcb_receive != NULL);
+
+    if(udp_bind(pcb_receive, IP_ADDR_ANY, 55558) != ERR_OK)
+    {
+        task_print("ERROR: Failed to BIND!\r\n");
+        while(1);
+    }
+    udp_recv(pcb_receive, udp_data_received, NULL);
+
+    while(true)
+    {
+        size_t sizeReceived = xQueueReceive(incomingEXIData, &datapackage, portMAX_DELAY); // blocks until data is available
+        if(sizeReceived == 0) // nothing was actually received
+        {
+            continue;
+        }
+
+        p = pbuf_alloc(PBUF_TRANSPORT, datapackage.numBytes, PBUF_REF);
+        p->payload = datapackage.addr;
+        p->len = datapackage.numBytes;
+        if(udp_send(pcb_send, p) != ERR_OK)
+        {
+            task_print("ERROR: Failed to SEND!\r\n");
+        }
+        pbuf_free(p);
+    }
+
+    udp_remove(pcb_send);
+    udp_remove(pcb_receive);
 }
 
 // task-safe print function that supports formatted strings and defers it to a low priority printing task
