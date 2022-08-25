@@ -31,22 +31,22 @@
 
 // lwIP
 #include "utils/lwiplib.h"
-//#define FAULT_SYSTICK           15          // System Tick, instead of including all of "inc/hw_ints.h"
 
 // Other
-//#include "SSI3DMASlave.h"
+#include "SSI3DMASlave.h"
 #include "DataPackage.h"
 
 // Task function prototypes
 void ethernetTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void uart0Task(void *pvParameters);
-//void EXISendTask(void *pvParameters);
+void EXISendTask(void *pvParameters);
 
 // Other function prototypes
 void UART0_Begin();
 void Ethernet_Begin();
 void task_print(char* fmt, ...);
+void DisplayIPAddress(uint32_t ui32Addr);
 
 // FreeRTOS data structures
 QueueHandle_t incomingEXIData;
@@ -76,10 +76,15 @@ int main(void)
     ASSERT(printableData != NULL);
 
     // Create tasks
-    xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
-    xTaskCreate(uart0Task, (const portCHAR *)"UART0", 1024, NULL, 2, NULL);
-    xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 4096, NULL, 4, NULL);
-    //xTaskCreate(EXISendTask, (const portCHAR *)"EXI", 4096, NULL, 5, NULL);
+    BaseType_t creationResult;
+    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 8192, NULL, 1, NULL);
+    ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
+    ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, NULL);
+    ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXI", 8192, NULL, 4, NULL);
+    ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -185,31 +190,10 @@ void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, cons
 {
     // pass the byte pbuf to EXISendTask
     //BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    task_print(p->payload);
+    //task_print(p->payload);
     //xQueueSendFromISR(outgoingEXIData, &p, &xHigherPriorityTaskWoken); //send to our exi send task.
-    pbuf_free(p); // previously-deferred free
-}
-
-//*****************************************************************************
-//
-// Display an lwIP type IP Address.
-//
-//*****************************************************************************
-void
-DisplayIPAddress(uint32_t ui32Addr)
-{
-    char pcBuf[16];
-
-    //
-    // Convert the IP Address into a string.
-    //
-    usprintf(pcBuf, "%d.%d.%d.%d", ui32Addr & 0xff, (ui32Addr >> 8) & 0xff,
-            (ui32Addr >> 16) & 0xff, (ui32Addr >> 24) & 0xff);
-
-    //
-    // Display the string.
-    //
-    xQueueSend(printableData, pcBuf, 0);
+    xQueueSend(outgoingEXIData, &p, 0); //send to our exi send task.
+    //pbuf_free(p); // previously-deferred free
 }
 
 // Task which handles all outgoing UDP communication
@@ -278,6 +262,40 @@ void ethernetTask(void *pvParameters)
     udp_remove(pcb_receive);
 }
 
+// Task which queues up an EXI Response
+void EXISendTask(void *pvParameters)
+{
+    // Initialize the SSI3 peripheral for SPI(0,0)
+    SSI3_Begin();
+    task_print("SSI3 Initialized.\r\n");
+
+    struct pbuf *p;
+
+    while(true)
+    {
+        size_t sizeReceived = xQueueReceive(outgoingEXIData, &p, portMAX_DELAY); // blocks until data is available
+        if(sizeReceived == 0) // nothing was actually received
+        {
+            continue;
+        }
+
+
+        size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
+
+        // debug prints to UART0
+        task_print("UDP Rx: %s\r\n", p->payload);
+
+        // normal EXI behavior
+        int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
+        pbuf_free(p); // previously-deferred free
+
+        if(retval != 0)
+        {
+            task_print("ERROR: Could not queue EXI reply. Write will overflow!\r\n");
+        }
+    }
+}
+
 // task-safe print function that supports formatted strings and defers it to a low priority printing task
 // supported max string length: 1024 characters
 void task_print(char* fmt, ...)
@@ -340,6 +358,28 @@ void heartbeatTask(void *pvParameters)
     }
 }
 
+//*****************************************************************************
+//
+// Display an lwIP type IP Address.
+//
+//*****************************************************************************
+void
+DisplayIPAddress(uint32_t ui32Addr)
+{
+    char pcBuf[16];
+
+    //
+    // Convert the IP Address into a string.
+    //
+    usprintf(pcBuf, "%d.%d.%d.%d", ui32Addr & 0xff, (ui32Addr >> 8) & 0xff,
+            (ui32Addr >> 16) & 0xff, (ui32Addr >> 24) & 0xff);
+
+    //
+    // Display the string.
+    //
+    xQueueSend(printableData, pcBuf, 0);
+}
+
 /*  ASSERT() Error function
  *
  *  failed ASSERTS() from driverlib/debug.h are executed in this function
@@ -350,4 +390,9 @@ void __error__(char *pcFilename, uint32_t ui32Line)
     while (1)
     {
     }
+}
+
+void vApplicationStackOverflowHook( TaskHandle_t xTask, char * pcTaskName )
+{
+    taskDISABLE_INTERRUPTS(); for(;;);
 }

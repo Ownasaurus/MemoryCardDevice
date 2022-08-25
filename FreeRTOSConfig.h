@@ -85,14 +85,11 @@ supported, or if both static and dynamic allocation are supported. */
 #define configMINIMAL_STACK_SIZE				( ( uint16_t ) 200 )
 #define configMAX_TASK_NAME_LEN					( 12 )
 
-/* Note heap_5.c is used so this only defines the part of the heap that is in
-the first block of RAM on the LPC device.  See the initialization of the heap
-in main.c. */
-#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 100 * 1024 ) )
+#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 180 * 1024 ) )
 
 /* Constants that build features in or out. */
 #define configUSE_MUTEXES						1
-#define configUSE_TICKLESS_IDLE					1
+#define configUSE_TICKLESS_IDLE					0
 #define configUSE_APPLICATION_TASK_TAG			0
 #define configUSE_NEWLIB_REENTRANT 				0
 #define configUSE_CO_ROUTINES 					0
@@ -107,7 +104,7 @@ in main.c. */
 #define configUSE_MALLOC_FAILED_HOOK			0
 
 /* Constants provided for debugging and optimization assistance. */
-#define configCHECK_FOR_STACK_OVERFLOW			0
+#define configCHECK_FOR_STACK_OVERFLOW			1
 //void vMainAssertCalled( const char *pcFileName, uint32_t ulLineNumber );
 //#define configASSERT( x ) if( ( x ) == 0 ) { vMainAssertCalled( __FILE__, __LINE__ ); }
 #define configASSERT(x) if( x == 0 ) { taskDISABLE_INTERRUPTS(); for(;;); }
