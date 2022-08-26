@@ -224,6 +224,8 @@ void ethernetTask(void *pvParameters)
     pcb_send = udp_new();
     configASSERT(pcb_send != NULL);
 
+    ip_set_option(pcb_send, SOF_BROADCAST); // enable broadcast ability on this PCB
+
     if(udp_connect(pcb_send, IP_ADDR_BROADCAST, 55559) != ERR_OK)
     {
         task_print("ERROR: Failed to CONNECT!\r\n");

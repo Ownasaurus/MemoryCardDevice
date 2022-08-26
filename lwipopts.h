@@ -32,6 +32,8 @@
 #ifndef LWIP_HDR_LWIPOPTS_H
 #define LWIP_HDR_LWIPOPTS_H
 
+//#define LWIP_DEBUG
+
 #define RTOS_FREERTOS                   1
 #define LWIP_TCPIP_CORE_LOCKING         0
 #define LWIP_COMPAT_MUTEX               1
