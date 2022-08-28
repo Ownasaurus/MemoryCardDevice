@@ -35,6 +35,7 @@
 // Other
 #include "SSI3DMASlave.h"
 #include "DataPackage.h"
+#include <Payloads.h>
 
 // Task function prototypes
 void ethernetTask(void *pvParameters);
@@ -280,7 +281,6 @@ void EXISendTask(void *pvParameters)
         {
             continue;
         }
-
 
         size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
 
