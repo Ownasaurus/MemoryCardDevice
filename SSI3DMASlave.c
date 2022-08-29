@@ -183,10 +183,13 @@ void gpioQ1IntHandler(void) {
     g_ui32MessageSizes[g_ui8RxWriteIndex] = msgSize;
 
     // ------Share over UDP----------
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    datapackage.addr = &g_ui8SSIRxBuf[g_ui8RxWriteIndex];
-    datapackage.numBytes = msgSize;
-    xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
+    if(msgSize > 0)
+    {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        datapackage.addr = &g_ui8SSIRxBuf[g_ui8RxWriteIndex];
+        datapackage.numBytes = msgSize;
+        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
+    }
     // ------------------------------
 
     //Move current rx write index to the next buffer
