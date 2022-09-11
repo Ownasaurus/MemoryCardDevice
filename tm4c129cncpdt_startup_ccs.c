@@ -35,7 +35,7 @@ void ResetISR(void);
 static void NmiSR(void);
 static void FaultISR(void);
 static void IntDefaultHandler(void);
-
+static void uDMAErrorHandler(void);
 //*****************************************************************************
 //
 // External declaration for the reset handler that is to be called when the
@@ -61,6 +61,8 @@ extern void xPortPendSVHandler(void);
 extern void vPortSVCHandler(void);
 extern void xPortSysTickHandler(void);
 extern void lwIPEthernetIntHandler(void);
+extern void Q1IntHandler(void);
+extern void SSI3IntHandler(void);
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
@@ -133,7 +135,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // USB0
     IntDefaultHandler,                      // PWM Generator 3
     IntDefaultHandler,                      // uDMA Software Transfer
-    IntDefaultHandler,                      // uDMA Error
+    uDMAErrorHandler,                       // uDMA Error
     IntDefaultHandler,                      // ADC1 Sequence 0
     IntDefaultHandler,                      // ADC1 Sequence 1
     IntDefaultHandler,                      // ADC1 Sequence 2
@@ -143,7 +145,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // GPIO Port K
     IntDefaultHandler,                      // GPIO Port L
     IntDefaultHandler,                      // SSI2 Rx and Tx
-    IntDefaultHandler,                      // SSI3 Rx and Tx
+    SSI3IntHandler,                         // SSI3 Rx and Tx
     IntDefaultHandler,                      // UART3 Rx and Tx
     IntDefaultHandler,                      // UART4 Rx and Tx
     IntDefaultHandler,                      // UART5 Rx and Tx
@@ -173,7 +175,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // GPIO Port P6
     IntDefaultHandler,                      // GPIO Port P7
     IntDefaultHandler,                      // GPIO Port Q (Summary or Q0)
-    IntDefaultHandler,                      // GPIO Port Q1
+    Q1IntHandler,                           // GPIO Port Q1
     IntDefaultHandler,                      // GPIO Port Q2
     IntDefaultHandler,                      // GPIO Port Q3
     IntDefaultHandler,                      // GPIO Port Q4
@@ -305,5 +307,21 @@ IntDefaultHandler(void)
     //
     while(1)
     {
+    }
+}
+
+// callback if an uDMA error occurs
+static void uDMAErrorHandler(void)
+{
+    static uint32_t uDMAErrCount = 0;
+
+    uint32_t ui32Status;
+
+    ui32Status = ROM_uDMAErrorStatusGet();
+
+    if (ui32Status)
+    {
+        ROM_uDMAErrorStatusClear();
+        uDMAErrCount++;
     }
 }
