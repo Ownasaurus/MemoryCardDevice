@@ -35,7 +35,6 @@ void ResetISR(void);
 static void NmiSR(void);
 static void FaultISR(void);
 static void IntDefaultHandler(void);
-static void uDMAErrorHandler(void);
 //*****************************************************************************
 //
 // External declaration for the reset handler that is to be called when the
@@ -63,6 +62,7 @@ extern void xPortSysTickHandler(void);
 extern void lwIPEthernetIntHandler(void);
 extern void Q1IntHandler(void);
 extern void SSI3IntHandler(void);
+extern void uDMAErrorHandler(void);
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
@@ -307,21 +307,5 @@ IntDefaultHandler(void)
     //
     while(1)
     {
-    }
-}
-
-// callback if an uDMA error occurs
-static void uDMAErrorHandler(void)
-{
-    static uint32_t uDMAErrCount = 0;
-
-    uint32_t ui32Status;
-
-    ui32Status = ROM_uDMAErrorStatusGet();
-
-    if (ui32Status)
-    {
-        ROM_uDMAErrorStatusClear();
-        uDMAErrCount++;
     }
 }

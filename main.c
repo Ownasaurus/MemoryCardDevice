@@ -269,7 +269,7 @@ void ethernetTask(void *pvParameters)
 void EXISendTask(void *pvParameters)
 {
     // Initialize the SSI3 peripheral for SPI(0,0)
-    SSI3_Begin();
+    SSI3_Init_SPI_0_0();
     task_print("SSI3 Initialized.\r\n");
 
     struct pbuf *p;
@@ -282,19 +282,19 @@ void EXISendTask(void *pvParameters)
             continue;
         }
 
-        size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
+        //size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
 
         // debug prints to UART0
         task_print("UDP Rx: %s\r\n", p->payload);
 
         // normal EXI behavior
-        int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
+        //int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
         pbuf_free(p); // previously-deferred free
 
-        if(retval != 0)
+        /*if(retval != 0)
         {
             task_print("ERROR: Could not queue EXI reply. Write will overflow!\r\n");
-        }
+        }*/
     }
 }
 
