@@ -181,7 +181,7 @@ void SSI3IntHandler(void)
 //*****************************************************************************
 void Q1IntHandler(void)
 {
-    // Clear interrupt flag
+    // Clear CS_n interrupt flag
     uint32_t ui32Status;
     ui32Status = ROM_GPIOIntStatus(GPIO_PORTQ_BASE, 1);
     ROM_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
@@ -202,12 +202,9 @@ void Q1IntHandler(void)
         datapackage.numBytes = msgSize;
         xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
 
-        // reset back to A
-        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
-                                       RX_Buffer_A, sizeof(RX_Buffer_A));
-
-        ResetSSI3();
-        ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
+        // reset back to B
+        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                       RX_Buffer_B, sizeof(RX_Buffer_B));
     }
 
     // Check if the alternate is active, and if so, flush it
@@ -229,10 +226,13 @@ void Q1IntHandler(void)
         // reset back to A
         ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
                                        RX_Buffer_A, sizeof(RX_Buffer_A));
-
-        ResetSSI3();
-        ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
     }
+
+    // force flush the SSI FIFOs
+    ResetSSI3();
+    // ensure everything is enabled
+    ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
+    ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
 }
 
 // callback if an uDMA error occurs

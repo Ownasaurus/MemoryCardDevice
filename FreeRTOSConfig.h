@@ -132,6 +132,7 @@ referenced anyway. */
 #define INCLUDE_eTaskGetState					1
 #define INCLUDE_xTaskResumeFromISR				0
 #define INCLUDE_xTaskGetCurrentTaskHandle		1
+#define INCLUDE_xTaskGetHandle                  1
 #define INCLUDE_xTaskGetSchedulerState			0
 #define INCLUDE_xSemaphoreGetMutexHolder		0
 #define INCLUDE_xTimerPendFunctionCall			1

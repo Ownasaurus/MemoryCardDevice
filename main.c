@@ -42,6 +42,7 @@ void ethernetTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void uart0Task(void *pvParameters);
 void EXISendTask(void *pvParameters);
+void EXIReceiveTask(void *pvParameters);
 
 // Other function prototypes
 void UART0_Begin();
@@ -51,8 +52,11 @@ void DisplayIPAddress(uint32_t ui32Addr);
 
 // FreeRTOS data structures
 QueueHandle_t incomingEXIData;
+QueueHandle_t outgoingUDPData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
+
+TaskHandle_t EXIReceiveTaskHandle;
 
 #define SYSTICK_INT_PRIORITY    0xE0 // priority 7
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
@@ -69,6 +73,9 @@ int main(void)
     UARTprintf("UART0 Initialized.\r\n");
 
     // Create IPC structures
+
+    outgoingUDPData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
+    ASSERT(outgpingUDPData != NULL);
     incomingEXIData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
     ASSERT(incomingEXIData != NULL);
     outgoingEXIData = xQueueCreate(8, sizeof(struct pbuf *)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
@@ -84,8 +91,13 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXI", 8192, NULL, 4, NULL);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 8192, NULL, 4, NULL);
+    ASSERT(creationResult == pdPASS);
+
+    EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
+    ASSERT(EXIReceiveTaskHandle != NULL);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -185,6 +197,47 @@ void Ethernet_Begin()
     MAP_IntPrioritySet(FAULT_SYSTICK, SYSTICK_INT_PRIORITY);
 }
 
+void EXIReceiveTask(void *pvParameters)
+{
+    #define MESSAGE_BUFFER_SIZE 2048
+    uint8_t fullMessageBuffer[MESSAGE_BUFFER_SIZE];
+    uint8_t index = 0;
+
+    DataPackage_t datapackage;
+
+    while(true)
+    {
+        size_t sizeReceived = xQueueReceive(incomingEXIData, &datapackage, portMAX_DELAY); // blocks until data is available
+        if(sizeReceived == 0) // nothing was actually received
+        {
+            continue;
+        }
+
+        uint32_t len;
+        if(index + datapackage.numBytes <= MESSAGE_BUFFER_SIZE) // message fits in the buffer
+        {
+            len = datapackage.numBytes;
+        }
+        else // this would overflow. so truncate. not ideal.
+        {
+            len = MESSAGE_BUFFER_SIZE - index;
+        }
+
+        memcpy(&fullMessageBuffer[index], datapackage.addr, len);
+        index += len;
+
+        //TODO: IMPLEMENT FLUSH COMMAND TO FLUSH TO UDP
+        // proper if statement on IPC semaphore
+        // https://www.freertos.org/RTOS_Task_Notification_As_Binary_Semaphore.html
+        if(0)
+        {
+            datapackage.addr = &fullMessageBuffer;
+            datapackage.numBytes = index;
+            xQueueSend(outgoingUDPData, &datapackage, 0); //send to our exi send task.
+        }
+    }
+}
+
 // Callback when UDP data is received
 // NOTE: The callback function is responsible for deallocating the pbuf, but we pass this along to the EXISendTask function
 void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
@@ -245,7 +298,7 @@ void ethernetTask(void *pvParameters)
 
     while(true)
     {
-        size_t sizeReceived = xQueueReceive(incomingEXIData, &datapackage, portMAX_DELAY); // blocks until data is available
+        size_t sizeReceived = xQueueReceive(outgoingUDPData, &datapackage, portMAX_DELAY); // blocks until data is available
         if(sizeReceived == 0) // nothing was actually received
         {
             continue;
