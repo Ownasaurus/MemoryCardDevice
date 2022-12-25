@@ -213,6 +213,8 @@ void EXIReceiveTask(void *pvParameters)
             continue;
         }
 
+        //task_print("Got something!\r\n");
+
         uint32_t len;
         if(index + datapackage.numBytes <= MESSAGE_BUFFER_SIZE) // message fits in the buffer
         {
@@ -229,6 +231,8 @@ void EXIReceiveTask(void *pvParameters)
         //TODO: IMPLEMENT FLUSH COMMAND TO FLUSH TO UDP
         // proper if statement on IPC semaphore
         // https://www.freertos.org/RTOS_Task_Notification_As_Binary_Semaphore.html
+        // TODO: try instead blocking on end of frame message. then flush entire messagequeue. will need malloc and free or something similar.
+        // OR try blocking but only for 100us at a time?
         if(0)
         {
             datapackage.addr = &fullMessageBuffer;
