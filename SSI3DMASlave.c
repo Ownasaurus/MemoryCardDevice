@@ -188,6 +188,7 @@ void Q1IntHandler(void)
 
     // Check if the primary is active, and if so, flush it
     ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
+    //TODO FIX: BOTH OF THE FOLLOWING IF STATEMENTS ARE TRIGGERING! MIGHT NEED TO WRAP THE OTHER IN AN ELSE
     if(ui32Status == UDMA_MODE_PINGPONG)
     {
         uint32_t xferSize = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);

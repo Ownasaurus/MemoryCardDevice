@@ -75,7 +75,7 @@ int main(void)
     // Create IPC structures
 
     outgoingUDPData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
-    ASSERT(outgpingUDPData != NULL);
+    ASSERT(outgoingUDPData != NULL);
     incomingEXIData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
     ASSERT(incomingEXIData != NULL);
     outgoingEXIData = xQueueCreate(8, sizeof(struct pbuf *)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
@@ -93,11 +93,12 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 8192, NULL, 4, NULL);
-    ASSERT(creationResult == pdPASS);
+    //creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 16384, NULL, 4, NULL);
+    //ASSERT(creationResult == pdPASS);
 
-    EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
-    ASSERT(EXIReceiveTaskHandle != NULL);
+    // the following line causes it to crash in debug mode
+    //EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
+    //ASSERT(EXIReceiveTaskHandle != NULL);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -213,7 +214,7 @@ void EXIReceiveTask(void *pvParameters)
             continue;
         }
 
-        //task_print("Got something!\r\n");
+        //task_print("Received something over EXI!\r\n");
 
         uint32_t len;
         if(index + datapackage.numBytes <= MESSAGE_BUFFER_SIZE) // message fits in the buffer
