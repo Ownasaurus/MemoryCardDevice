@@ -27,7 +27,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "message_buffer.h"
+#include "stream_buffer.h"
 
 // lwIP
 #include "utils/lwiplib.h"
@@ -51,15 +51,19 @@ void task_print(char* fmt, ...);
 void DisplayIPAddress(uint32_t ui32Addr);
 
 // FreeRTOS data structures
-QueueHandle_t incomingEXIData;
-QueueHandle_t outgoingUDPData;
+StreamBufferHandle_t incomingEXIData;
+StreamBufferHandle_t outgoingUDPData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
 
-TaskHandle_t EXIReceiveTaskHandle;
+TaskHandle_t ENETTaskHandle;
 
 #define SYSTICK_INT_PRIORITY    0xE0 // priority 7
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
+
+#define MESSAGE_BUFFER_SIZE 2048
+uint8_t fullMessageBuffer[MESSAGE_BUFFER_SIZE];
+uint8_t index = 0;
 
 int main(void)
 {
@@ -74,9 +78,9 @@ int main(void)
 
     // Create IPC structures
 
-    outgoingUDPData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
+    outgoingUDPData = xStreamBufferCreate(2048, 1); // length of 2048 should be more than enough. Size rarely breaks 1024.
     ASSERT(outgoingUDPData != NULL);
-    incomingEXIData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
+    incomingEXIData = xStreamBufferCreate(2048, 1); // length of 2048 should be more than enough. Size rarely breaks 1024.
     ASSERT(incomingEXIData != NULL);
     outgoingEXIData = xQueueCreate(8, sizeof(struct pbuf *)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
     ASSERT(outgoingEXIData != NULL);
@@ -93,12 +97,8 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
-    //creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 16384, NULL, 4, NULL);
-    //ASSERT(creationResult == pdPASS);
-
-    // the following line causes it to crash in debug mode
-    //EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
-    //ASSERT(EXIReceiveTaskHandle != NULL);
+    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 16384, NULL, 4, NULL);
+    ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -200,46 +200,37 @@ void Ethernet_Begin()
 
 void EXIReceiveTask(void *pvParameters)
 {
-    #define MESSAGE_BUFFER_SIZE 2048
-    uint8_t fullMessageBuffer[MESSAGE_BUFFER_SIZE];
-    uint8_t index = 0;
-
-    DataPackage_t datapackage;
+    uint8_t receivedBytes[4096]; // extra room in case of overflow, which shouldn't happen
+    uint8_t *currPtr = receivedBytes;
+    uint16_t currIndex = 0;
 
     while(true)
     {
-        size_t sizeReceived = xQueueReceive(incomingEXIData, &datapackage, portMAX_DELAY); // blocks until data is available
-        if(sizeReceived == 0) // nothing was actually received
+        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, 1); // blocks until data is available // TODO: might add an extra 1ms of overhead. review. improve logic.
+        if(sizeReceived != 0) // something was actually received
         {
-            continue;
+            // update pointers
+            currIndex += sizeReceived;
+            currPtr += sizeReceived;
+        }
+
+        // check if semaphore was set, meaning we're ready to flush
+        uint32_t ulNotifiedValue = ulTaskNotifyTake(pdFALSE, 0);
+        if(ulNotifiedValue != 0) // we actually got a notification
+        {
+            //if so, dump to ethernetTask
+            xStreamBufferSend(outgoingUDPData, &receivedBytes, currIndex, 0);
+
+            //reset buffers and buffer pointers
+            currPtr = receivedBytes;
+            currIndex = 0;
         }
 
         //task_print("Received something over EXI!\r\n");
 
-        uint32_t len;
-        if(index + datapackage.numBytes <= MESSAGE_BUFFER_SIZE) // message fits in the buffer
-        {
-            len = datapackage.numBytes;
-        }
-        else // this would overflow. so truncate. not ideal.
-        {
-            len = MESSAGE_BUFFER_SIZE - index;
-        }
-
-        memcpy(&fullMessageBuffer[index], datapackage.addr, len);
-        index += len;
-
-        //TODO: IMPLEMENT FLUSH COMMAND TO FLUSH TO UDP
-        // proper if statement on IPC semaphore
-        // https://www.freertos.org/RTOS_Task_Notification_As_Binary_Semaphore.html
-        // TODO: try instead blocking on end of frame message. then flush entire messagequeue. will need malloc and free or something similar.
-        // OR try blocking but only for 100us at a time?
-        if(0)
-        {
-            datapackage.addr = &fullMessageBuffer;
-            datapackage.numBytes = index;
-            xQueueSend(outgoingUDPData, &datapackage, 0); //send to our exi send task.
-        }
+        // check if flag to continue has been met, non-blocking
+        // if so, dump to ethernetTask
+        // if not, keep looping
     }
 }
 
@@ -259,6 +250,10 @@ void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, cons
 #pragma diag_suppress=112 // suppress the warning that the last line cannot be reached.
 void ethernetTask(void *pvParameters)
 {
+    // the following line causes it to crash in debug mode?
+    ENETTaskHandle = xTaskGetHandle("ENET");
+    ASSERT(ENETTaskHandle != NULL);
+
     Ethernet_Begin();
     task_print("Ethernet Initialized.\r\n");
 
@@ -278,7 +273,6 @@ void ethernetTask(void *pvParameters)
 
     struct udp_pcb *pcb_send, *pcb_receive;
     struct pbuf *p;
-    DataPackage_t datapackage;
 
     pcb_send = udp_new();
     configASSERT(pcb_send != NULL);
@@ -301,22 +295,25 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
+    uint8_t fullMessageBuffer[2048];
     while(true)
     {
-        size_t sizeReceived = xQueueReceive(outgoingUDPData, &datapackage, portMAX_DELAY); // blocks until data is available
+        size_t sizeReceived = xStreamBufferReceive(outgoingUDPData, &fullMessageBuffer, 2048, portMAX_DELAY); // blocks until data is available
         if(sizeReceived == 0) // nothing was actually received
         {
             continue;
         }
 
-        p = pbuf_alloc(PBUF_TRANSPORT, datapackage.numBytes, PBUF_REF);
-        p->payload = datapackage.addr;
-        p->len = datapackage.numBytes;
+        p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_REF);
+        p->payload = fullMessageBuffer;
+        p->len = sizeReceived;
         if(udp_send(pcb_send, p) != ERR_OK)
         {
             task_print("ERROR: Failed to SEND!\r\n");
         }
         pbuf_free(p);
+
+        index = 0;
     }
 
     udp_remove(pcb_send);

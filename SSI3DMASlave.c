@@ -21,12 +21,14 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "stream_buffer.h"
 
 #include "DataPackage.h"
 #include "SSI3DMASlave.h"
 #include "main.h"
 
-extern QueueHandle_t incomingEXIData;
+extern StreamBufferHandle_t incomingEXIData;
+extern TaskHandle_t ENETTaskHandle;
 DataPackage_t datapackage;
 
 #define SPI_CLOCK_SPEED 8000000 // 8Mhz. GCN supports up to 32MHz, but this board can only do up to 10MHz as slave reliably
@@ -97,6 +99,8 @@ void SSI3_Init_SPI_0_0()
     ROM_uDMAChannelControlSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 | UDMA_ARB_4);
     ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
                                RX_Buffer_A, sizeof(RX_Buffer_A));
+    ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                               RX_Buffer_B, sizeof(RX_Buffer_B));
     ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
 
     // ----- Enable Interrupts -----
@@ -132,6 +136,8 @@ void SSI3IntHandler(void)
     ui32Status = ROM_GPIOIntStatus(SSI3_BASE, 1);
     ROM_GPIOIntClear(SSI3_BASE, ui32Status);
 
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     // DMA is complete, so get it ready to go again
 
     // Ready the next Rx buffer
@@ -139,28 +145,24 @@ void SSI3IntHandler(void)
 
     if(ui32Status == UDMA_MODE_STOP) // buffer A is done with a transfer
     {
-        // So switch to B
-        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
-                                       RX_Buffer_B, sizeof(RX_Buffer_B));
-        // Send contents of A
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        datapackage.addr = RX_Buffer_A;
-        datapackage.numBytes = 1024;
-        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
+        // So set up A for next time!
+        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                       RX_Buffer_A, sizeof(RX_Buffer_A));
+        // Copy/send contents of A
+        xHigherPriorityTaskWoken = pdFALSE;
+        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, sizeof(RX_Buffer_A), &xHigherPriorityTaskWoken);
     }
 
     ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
 
     if(ui32Status == UDMA_MODE_STOP) // buffer B is done with a transfer
     {
-        // so switch back to A
-        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
-                                       RX_Buffer_A, sizeof(RX_Buffer_A));
-        // Send contents of B
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        datapackage.addr = RX_Buffer_B;
-        datapackage.numBytes = 1024;
-        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
+        // So set up B for next time!
+        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                       RX_Buffer_B, sizeof(RX_Buffer_B));
+        // Copy/send contents of B
+        xHigherPriorityTaskWoken = pdFALSE;
+        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_B, sizeof(RX_Buffer_B), &xHigherPriorityTaskWoken);
     }
 
     //ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX); // this should never get disabled? so no need to re-enable?
@@ -186,54 +188,48 @@ void Q1IntHandler(void)
     ui32Status = ROM_GPIOIntStatus(GPIO_PORTQ_BASE, 1);
     ROM_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
 
-    // Check if the primary is active, and if so, flush it
-    ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
-    //TODO FIX: BOTH OF THE FOLLOWING IF STATEMENTS ARE TRIGGERING! MIGHT NEED TO WRAP THE OTHER IN AN ELSE
-    if(ui32Status == UDMA_MODE_PINGPONG)
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    //TODO: send the last remaining parts of the last buffer
+    //TODO: figure out which one is mid-transfer. which is active?
+    // inactive one should be 1024
+    uint32_t xferSizePrimary = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
+    uint32_t xferSizeAlternate = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
+
+    if(xferSizePrimary == 1024 && xferSizeAlternate == 1024) // edge case where neither has data left
     {
-        uint32_t xferSize = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
-        //Get the size of the remainder of the transfer
-        uint32_t msgSize = DMA_SIZE - xferSize;
+        // notify ethernet function that our frame is done
+        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+    }
+    else if(xferSizePrimary == 1024)
+    {
+        // send the last bit of the ALTERNATE
+        xHigherPriorityTaskWoken = pdFALSE;
+        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_B, (1024-xferSizeAlternate), &xHigherPriorityTaskWoken);
 
-        ROM_uDMAChannelDisable(UDMA_CH14_SSI3RX);
+        // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+    }
+    else if(xferSizeAlternate == 1024)
+    {
+        // send the last bit of the PRIMARY
+        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
 
-        // Send contents of A
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        datapackage.addr = RX_Buffer_A;
-        datapackage.numBytes = msgSize;
-        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
-
-        // reset back to B
-        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
-                                       RX_Buffer_B, sizeof(RX_Buffer_B));
+        // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+    }
+    else
+    {
+        // should never get here
     }
 
-    // Check if the alternate is active, and if so, flush it
-    ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
-    if(ui32Status == UDMA_MODE_PINGPONG)
-    {
-        uint32_t xferSize = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
-        //Get the size of the remainder of the transfer
-        uint32_t msgSize = DMA_SIZE - xferSize;
-
-        ROM_uDMAChannelDisable(UDMA_CH14_SSI3RX);
-
-        // Send contents of B
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        datapackage.addr = RX_Buffer_B;
-        datapackage.numBytes = msgSize;
-        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
-
-        // reset back to A
-        ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
-                                       RX_Buffer_A, sizeof(RX_Buffer_A));
-    }
-
+    /*
     // force flush the SSI FIFOs
     ResetSSI3();
     // ensure everything is enabled
     ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
-    ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+    ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);*/
 }
 
 // callback if an uDMA error occurs
