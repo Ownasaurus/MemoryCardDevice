@@ -224,6 +224,14 @@ void Q1IntHandler(void)
         // should never get here
     }
 
+    // reset the Rx DMA transfers
+    ROM_uDMAChannelDisable(UDMA_CH14_SSI3RX);
+    ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                           RX_Buffer_A, sizeof(RX_Buffer_A));
+    ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                           RX_Buffer_B, sizeof(RX_Buffer_B));
+    ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
+
     /*
     // force flush the SSI FIFOs
     ResetSSI3();
