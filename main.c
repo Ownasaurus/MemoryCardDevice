@@ -97,7 +97,7 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 16384, NULL, 4, NULL);
+    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
