@@ -107,7 +107,8 @@ void SSI3_Init_SPI_0_0()
 
     ROM_IntEnable(INT_UDMAERR); // enable dma error interrupts
     ROM_SSIIntDisable(SSI3_BASE, SSI_DMATX | SSI_DMARX | SSI_TXEOT | SSI_TXFF | SSI_RXFF | SSI_RXTO | SSI_RXOR); // start with a clean slate
-    ROM_SSIIntEnable(SSI3_BASE, SSI_DMATX | SSI_DMARX); // enable DMA transfer complete and Rx timeout interrupts
+    ROM_SSIIntEnable(SSI3_BASE, /*SSI_DMATX | */SSI_DMARX); // enable DMA transfer complete and Rx timeout interrupts
+    ROM_IntPrioritySet(INT_SSI3, 0xA0); // priority 5
     ROM_IntEnable(INT_SSI3); // enable SSI3 interrupts in general
 
     ROM_GPIOIntTypeSet(GPIO_PORTQ_BASE, GPIO_PIN_1, GPIO_RISING_EDGE | GPIO_DISCRETE_INT); // signifies SPI transfer complete
@@ -135,7 +136,7 @@ void SSI3IntHandler(void)
 {
     // Clear interrupt flag
     uint32_t ui32Status;
-    ui32Status = ROM_GPIOIntStatus(SSI3_BASE, 1);
+    ui32Status = ROM_SSIIntStatus(SSI3_BASE, 1);
     //ROM_GPIOIntClear(SSI3_BASE, ui32Status);
     if(ui32Status & SSI_DMARX) // DMA Rx done
     {
@@ -176,12 +177,12 @@ void SSI3IntHandler(void)
     //ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX); // this should never get disabled? so no need to re-enable?
 
     // Ready the next Tx buffer
-    if(!ROM_uDMAChannelIsEnabled(UDMA_CH15_SSI3TX))
+    /*if(!ROM_uDMAChannelIsEnabled(UDMA_CH15_SSI3TX))
     {
         ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
                                        (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
         ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-    }
+    }*/
 }
 
 //*****************************************************************************

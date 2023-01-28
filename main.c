@@ -91,7 +91,7 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, NULL);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 10240, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
@@ -298,8 +298,10 @@ void ethernetTask(void *pvParameters)
         p = pbuf_alloc(PBUF_TRANSPORT, sizeReceived, PBUF_REF);
         p->payload = fullMessageBuffer;
         p->len = sizeReceived;
-        if(udp_send(pcb_send, p) != ERR_OK)
+        err_t tempVal = udp_send(pcb_send, p);
+        if(tempVal != ERR_OK)
         {
+            // getting ERR_MEM for large packets
             task_print("ERROR: Failed to SEND!\r\n");
         }
         pbuf_free(p);
