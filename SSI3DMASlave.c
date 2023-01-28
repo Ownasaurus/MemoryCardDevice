@@ -107,7 +107,7 @@ void SSI3_Init_SPI_0_0()
 
     ROM_IntEnable(INT_UDMAERR); // enable dma error interrupts
     ROM_SSIIntDisable(SSI3_BASE, SSI_DMATX | SSI_DMARX | SSI_TXEOT | SSI_TXFF | SSI_RXFF | SSI_RXTO | SSI_RXOR); // start with a clean slate
-    ROM_SSIIntEnable(SSI3_BASE, /*SSI_DMATX | */SSI_DMARX); // enable DMA transfer complete and Rx timeout interrupts
+    ROM_SSIIntEnable(SSI3_BASE, SSI_DMATX | SSI_DMARX); // enable DMA transfer complete and Rx timeout interrupts
     ROM_IntPrioritySet(INT_SSI3, 0xA0); // priority 5
     ROM_IntEnable(INT_SSI3); // enable SSI3 interrupts in general
 
@@ -137,12 +137,15 @@ void SSI3IntHandler(void)
     // Clear interrupt flag
     uint32_t ui32Status;
     ui32Status = ROM_SSIIntStatus(SSI3_BASE, 1);
-    //ROM_GPIOIntClear(SSI3_BASE, ui32Status);
     if(ui32Status & SSI_DMARX) // DMA Rx done
     {
-        ROM_SSIDMADisable(SSI3_BASE, SSI_DMA_TX); // needed to not infinite loop
+        //ROM_SSIDMADisable(SSI3_BASE, SSI_DMA_TX); // needed to not infinite loop
         ROM_SSIIntClear(SSI3_BASE, SSI_DMARX);
-        //ROM_SSIIntClear(SSI3_BASE, ui32Status);
+    }
+    if(ui32Status & SSI_DMATX) // DMA Tx done
+    {
+        //ROM_SSIDMADisable(SSI3_BASE, SSI_DMA_TX); // needed to not infinite loop
+        ROM_SSIIntClear(SSI3_BASE, SSI_DMATX);
     }
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -174,15 +177,13 @@ void SSI3IntHandler(void)
         xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_B, sizeof(RX_Buffer_B), &xHigherPriorityTaskWoken);
     }
 
-    //ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX); // this should never get disabled? so no need to re-enable?
-
     // Ready the next Tx buffer
-    /*if(!ROM_uDMAChannelIsEnabled(UDMA_CH15_SSI3TX))
+    if(!ROM_uDMAChannelIsEnabled(UDMA_CH15_SSI3TX))
     {
         ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
                                        (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
         ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-    }*/
+    }
 }
 
 //*****************************************************************************
@@ -198,9 +199,8 @@ void Q1IntHandler(void)
     ROM_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    //TODO: send the last remaining parts of the last buffer
-    //TODO: figure out which one is mid-transfer. which is active?
-    // inactive one should be 1024 OR 0
+
+    // inactive one should be 1024 OR 0 (full or empty)
     uint32_t xferSizePrimary = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
     uint32_t xferSizeAlternate = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
 
