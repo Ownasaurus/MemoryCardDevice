@@ -56,7 +56,7 @@ StreamBufferHandle_t outgoingUDPData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
 
-TaskHandle_t ENETTaskHandle;
+TaskHandle_t EXIReceiveTaskHandle;
 
 #define SYSTICK_INT_PRIORITY    0xE0 // priority 7
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
@@ -200,6 +200,10 @@ void Ethernet_Begin()
 
 void EXIReceiveTask(void *pvParameters)
 {
+    // the following line causes it to crash in debug mode?
+    EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
+    ASSERT(EXIReceiveTaskHandle != NULL);
+
     uint8_t receivedBytes[4096]; // extra room in case of overflow, which shouldn't happen
     uint8_t *currPtr = receivedBytes;
     uint16_t currIndex = 0;
@@ -250,10 +254,6 @@ void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, cons
 #pragma diag_suppress=112 // suppress the warning that the last line cannot be reached.
 void ethernetTask(void *pvParameters)
 {
-    // the following line causes it to crash in debug mode?
-    ENETTaskHandle = xTaskGetHandle("ENET");
-    ASSERT(ENETTaskHandle != NULL);
-
     Ethernet_Begin();
     task_print("Ethernet Initialized.\r\n");
 

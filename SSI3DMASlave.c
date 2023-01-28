@@ -28,7 +28,7 @@
 #include "main.h"
 
 extern StreamBufferHandle_t incomingEXIData;
-extern TaskHandle_t ENETTaskHandle;
+extern TaskHandle_t EXIReceiveTaskHandle;
 DataPackage_t datapackage;
 
 #define SPI_CLOCK_SPEED 8000000 // 8Mhz. GCN supports up to 32MHz, but this board can only do up to 10MHz as slave reliably
@@ -198,7 +198,7 @@ void Q1IntHandler(void)
     if(xferSizePrimary == 1024 && xferSizeAlternate == 1024) // edge case where neither has data left
     {
         // notify ethernet function that our frame is done
-        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
     else if(xferSizePrimary == 1024)
     {
@@ -208,7 +208,7 @@ void Q1IntHandler(void)
 
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
     else if(xferSizeAlternate == 1024)
     {
@@ -217,7 +217,7 @@ void Q1IntHandler(void)
 
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(ENETTaskHandle, &xHigherPriorityTaskWoken);
+        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
     else
     {
