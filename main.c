@@ -62,8 +62,6 @@ TaskHandle_t EXIReceiveTaskHandle;
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
 
 #define MESSAGE_BUFFER_SIZE 2048
-uint8_t fullMessageBuffer[MESSAGE_BUFFER_SIZE];
-uint8_t index = 0;
 
 int main(void)
 {
@@ -89,7 +87,7 @@ int main(void)
 
     // Create tasks
     BaseType_t creationResult;
-    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 8192, NULL, 1, NULL);
+    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
     ASSERT(creationResult == pdPASS);
@@ -200,7 +198,6 @@ void Ethernet_Begin()
 
 void EXIReceiveTask(void *pvParameters)
 {
-    // the following line causes it to crash in debug mode?
     EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
     ASSERT(EXIReceiveTaskHandle != NULL);
 
@@ -210,7 +207,7 @@ void EXIReceiveTask(void *pvParameters)
 
     while(true)
     {
-        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, 1); // blocks until data is available // TODO: might add an extra 1ms of overhead. review. improve logic.
+        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, portMAX_DELAY); // blocks until data is available // TODO: might add an extra 1ms of overhead. review. improve logic.
         if(sizeReceived != 0) // something was actually received
         {
             // update pointers
@@ -229,12 +226,6 @@ void EXIReceiveTask(void *pvParameters)
             currPtr = receivedBytes;
             currIndex = 0;
         }
-
-        //task_print("Received something over EXI!\r\n");
-
-        // check if flag to continue has been met, non-blocking
-        // if so, dump to ethernetTask
-        // if not, keep looping
     }
 }
 
@@ -304,7 +295,7 @@ void ethernetTask(void *pvParameters)
             continue;
         }
 
-        p = pbuf_alloc(PBUF_TRANSPORT, index, PBUF_REF);
+        p = pbuf_alloc(PBUF_TRANSPORT, sizeReceived, PBUF_REF);
         p->payload = fullMessageBuffer;
         p->len = sizeReceived;
         if(udp_send(pcb_send, p) != ERR_OK)
@@ -312,8 +303,6 @@ void ethernetTask(void *pvParameters)
             task_print("ERROR: Failed to SEND!\r\n");
         }
         pbuf_free(p);
-
-        index = 0;
     }
 
     udp_remove(pcb_send);

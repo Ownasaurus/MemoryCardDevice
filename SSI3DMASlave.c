@@ -191,16 +191,16 @@ void Q1IntHandler(void)
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     //TODO: send the last remaining parts of the last buffer
     //TODO: figure out which one is mid-transfer. which is active?
-    // inactive one should be 1024
+    // inactive one should be 1024 OR 0
     uint32_t xferSizePrimary = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
     uint32_t xferSizeAlternate = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
 
-    if(xferSizePrimary == 1024 && xferSizeAlternate == 1024) // edge case where neither has data left
+    if((xferSizePrimary == 1024 || xferSizePrimary == 0) && (xferSizeAlternate == 1024 || xferSizeAlternate == 0)) // edge case where neither has data left
     {
         // notify ethernet function that our frame is done
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
-    else if(xferSizePrimary == 1024)
+    else if((xferSizePrimary == 1024 || xferSizePrimary == 0)) // primary has nothing, alternate has data
     {
         // send the last bit of the ALTERNATE
         xHigherPriorityTaskWoken = pdFALSE;
@@ -210,7 +210,7 @@ void Q1IntHandler(void)
         xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
-    else if(xferSizeAlternate == 1024)
+    else if((xferSizeAlternate == 1024 || xferSizeAlternate == 0)) // primary has data, alternate has nothing
     {
         // send the last bit of the PRIMARY
         xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
@@ -219,7 +219,7 @@ void Q1IntHandler(void)
         xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
-    else
+    else // both transfers are in-process? should be impossible!
     {
         // should never get here
     }
