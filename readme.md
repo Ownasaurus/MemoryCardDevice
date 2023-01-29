@@ -14,4 +14,6 @@ This README should be updated in the near future.
 
 @ChrisPVille - Help, direction, debugging, advice, and more. this would not have happened without his support.
 
+@rasteri - Getting pingpong buffers working
+
 @altf4 - Lots of testing!
