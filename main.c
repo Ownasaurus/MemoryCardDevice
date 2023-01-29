@@ -115,16 +115,16 @@ void Ethernet_Begin()
     //
     // this app wants to configure for ethernet LED function.
     //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-    ROM_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
-    ROM_GPIOPinConfigure(GPIO_PF4_EN0LED1);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    MAP_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
+    MAP_GPIOPinConfigure(GPIO_PF4_EN0LED1);
 
     GPIOPinTypeEthernetLED(GPIO_PORTF_BASE, GPIO_PIN_0 | GPIO_PIN_4);
 
     //
     // Configure Port N1 for as an output for the animation LED.
     //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
     MAP_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
 
     //
@@ -367,10 +367,10 @@ void task_print(char* fmt, ...)
 // Initialize UART0
 void UART0_Begin()
 {
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
-    ROM_GPIOPinConfigure(GPIO_PA0_U0RX);
-    ROM_GPIOPinConfigure(GPIO_PA1_U0TX);
-    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    MAP_GPIOPinConfigure(GPIO_PA0_U0RX);
+    MAP_GPIOPinConfigure(GPIO_PA1_U0TX);
+    MAP_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 
     UARTStdioConfig(0, 115200, SYSTEM_CLOCK);
 }

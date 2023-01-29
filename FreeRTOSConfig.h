@@ -85,7 +85,7 @@ supported, or if both static and dynamic allocation are supported. */
 #define configMINIMAL_STACK_SIZE				( ( uint16_t ) 200 )
 #define configMAX_TASK_NAME_LEN					( 12 )
 
-#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 200 * 1024 ) )
+#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 230 * 1024 ) )
 
 /* Constants that build features in or out. */
 #define configUSE_MUTEXES						1
