@@ -34,7 +34,6 @@
 
 // Other
 #include "SSI3DMASlave.h"
-#include "DataPackage.h"
 #include <Payloads.h>
 
 // Task function prototypes
@@ -207,7 +206,7 @@ void EXIReceiveTask(void *pvParameters)
 
     while(true)
     {
-        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, portMAX_DELAY); // blocks until data is available // TODO: might add an extra 1ms of overhead. review. improve logic.
+        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, portMAX_DELAY); // blocks until data is available
         if(sizeReceived != 0) // something was actually received
         {
             // update pointers
@@ -215,8 +214,17 @@ void EXIReceiveTask(void *pvParameters)
             currPtr += sizeReceived;
         }
 
+        taskENTER_CRITICAL();
+        // this hopefully eliminates the possibility of a race condition. double check for remaining data
+        if(!xStreamBufferIsEmpty(incomingEXIData))
+        {
+            taskEXIT_CRITICAL();
+            continue;
+        }
+
         // check if semaphore was set, meaning we're ready to flush
         uint32_t ulNotifiedValue = ulTaskNotifyTake(pdFALSE, 0);
+        taskEXIT_CRITICAL();
         if(ulNotifiedValue != 0) // we actually got a notification
         {
             //if so, dump to ethernetTask
@@ -234,11 +242,7 @@ void EXIReceiveTask(void *pvParameters)
 void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
 {
     // pass the byte pbuf to EXISendTask
-    //BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    //task_print(p->payload);
-    //xQueueSendFromISR(outgoingEXIData, &p, &xHigherPriorityTaskWoken); //send to our exi send task.
     xQueueSend(outgoingEXIData, &p, 0); //send to our exi send task.
-    //pbuf_free(p); // previously-deferred free
 }
 
 // Task which handles all outgoing UDP communication

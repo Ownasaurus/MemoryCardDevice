@@ -23,13 +23,11 @@
 #include "queue.h"
 #include "stream_buffer.h"
 
-#include "DataPackage.h"
 #include "SSI3DMASlave.h"
 #include "main.h"
 
 extern StreamBufferHandle_t incomingEXIData;
 extern TaskHandle_t EXIReceiveTaskHandle;
-DataPackage_t datapackage;
 
 #define SPI_CLOCK_SPEED 8000000 // 8Mhz. GCN supports up to 32MHz, but this board can only do up to 10MHz as slave reliably
 #define DMA_SIZE 1024 // Max size of DMA transfers
@@ -126,6 +124,9 @@ void ResetSSI3(void)
                          SSI_MODE_SLAVE, SPI_CLOCK_SPEED / 12, 8);
 
     MAP_SSIEnable(SSI3_BASE);
+    MAP_SSIIntEnable(SSI3_BASE, SSI_DMATX | SSI_DMARX);
+    MAP_IntPrioritySet(INT_SSI3, 0xA0);
+    MAP_IntEnable(INT_SSI3);
     MAP_SSIDMAEnable(SSI3_BASE, SSI_DMA_RX | SSI_DMA_TX);
 }
 
@@ -194,6 +195,7 @@ void Q1IntHandler(void)
     MAP_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint8_t TX_needs_resetting = 1;
 
     // inactive one should be 1024 OR 0 (full or empty)
     uint32_t xferSizePrimary = MAP_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
@@ -213,15 +215,34 @@ void Q1IntHandler(void)
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
+
+        if(RX_Buffer_B[0] == 0x74) // all star?
+        {
+            TX_needs_resetting = 2;
+        }
+        else if(RX_Buffer_B[0] == 0x75) // adventure mode?
+        {
+            TX_needs_resetting = 3;
+        }
     }
     else if((xferSizeAlternate == 1024 || xferSizeAlternate == 0)) // primary has data, alternate has nothing
     {
         // send the last bit of the PRIMARY
+        xHigherPriorityTaskWoken = pdFALSE;
         xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
 
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
+
+        if(RX_Buffer_A[0] == 0x74) // all star?
+        {
+            TX_needs_resetting = 2;
+        }
+        else if(RX_Buffer_A[0] == 0x75) // adventure mode?
+        {
+            TX_needs_resetting = 3;
+        }
     }
     else // both transfers are in-process? should be impossible!
     {
@@ -237,16 +258,34 @@ void Q1IntHandler(void)
     MAP_uDMAChannelEnable(UDMA_CH14_SSI3RX);
 
     // reset the Tx DMA transfers
-    MAP_uDMAChannelDisable(UDMA_CH15_SSI3TX);
-    MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
-                                   (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
-    MAP_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-
-    /*
-    // force flush the SSI FIFOs
-    ResetSSI3();
-    // ensure everything is enabled
-    MAP_uDMAChannelEnable(UDMA_CH15_SSI3TX);*/
+    if(TX_needs_resetting == 1) // default
+    {
+        MAP_uDMAChannelDisable(UDMA_CH15_SSI3TX);
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
+                                       (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+        ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
+        MAP_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+    }
+    else if(TX_needs_resetting == 2) // all star?
+    {
+        ROM_uDMAChannelDisable(UDMA_CH15_SSI3TX);
+        ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
+                                               UDMA_MODE_BASIC, allstar_data,
+                                               (void *)(SSI3_BASE + SSI_O_DR),
+                                               sizeof(allstar_data));
+        ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
+        ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+    }
+    else if(TX_needs_resetting == 3) // adventure?
+    {
+        ROM_uDMAChannelDisable(UDMA_CH15_SSI3TX);
+        ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
+                                               UDMA_MODE_BASIC, adventure_data,
+                                               (void *)(SSI3_BASE + SSI_O_DR),
+                                               sizeof(adventure_data));
+        ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
+        ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+    }
 }
 
 // callback if an uDMA error occurs
