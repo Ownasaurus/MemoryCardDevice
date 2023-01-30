@@ -204,6 +204,7 @@ void Q1IntHandler(void)
     if((xferSizePrimary == 1024 || xferSizePrimary == 0) && (xferSizeAlternate == 1024 || xferSizeAlternate == 0)) // edge case where neither has data left
     {
         // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
         vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
     }
     else if((xferSizePrimary == 1024 || xferSizePrimary == 0)) // primary has nothing, alternate has data
