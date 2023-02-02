@@ -21,13 +21,12 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "stream_buffer.h"
+#include "message_buffer.h"
 
 #include "SSI3DMASlave.h"
 #include "main.h"
 
-extern StreamBufferHandle_t incomingEXIData;
-extern TaskHandle_t EXIReceiveTaskHandle;
+extern MessageBufferHandle_t outgoingUDPData;
 
 #define SPI_CLOCK_SPEED 8000000 // 8Mhz. GCN supports up to 32MHz, but this board can only do up to 10MHz as slave reliably
 #define DMA_SIZE 1024 // Max size of DMA transfers
@@ -155,7 +154,7 @@ void SSI3IntHandler(void)
     {
         // Copy/send contents of A
         xHigherPriorityTaskWoken = pdFALSE;
-        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, sizeof(RX_Buffer_A), &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, sizeof(RX_Buffer_A), &xHigherPriorityTaskWoken);
 
         // So set up A for next time!
         MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
@@ -168,7 +167,7 @@ void SSI3IntHandler(void)
     {
         // Copy/send contents of B
         xHigherPriorityTaskWoken = pdFALSE;
-        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_B, sizeof(RX_Buffer_B), &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_B, sizeof(RX_Buffer_B), &xHigherPriorityTaskWoken);
 
         // So set up B for next time!
         MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
@@ -207,17 +206,17 @@ void Q1IntHandler(void)
     {
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
     }
     else if(xferSizePrimary == 1024) // primary has nothing, alternate has data
     {
         // send the last bit of the ALTERNATE
         xHigherPriorityTaskWoken = pdFALSE;
-        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_B, (1024-xferSizeAlternate), &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_B, (1024-xferSizeAlternate), &xHigherPriorityTaskWoken);
 
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
 
         if(RX_Buffer_B[0] == 0x74) // all star?
         {
@@ -232,11 +231,11 @@ void Q1IntHandler(void)
     {
         // send the last bit of the PRIMARY
         xHigherPriorityTaskWoken = pdFALSE;
-        xStreamBufferSendFromISR(incomingEXIData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
 
         // notify ethernet function that our frame is done
         xHigherPriorityTaskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(EXIReceiveTaskHandle, &xHigherPriorityTaskWoken);
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
 
         if(RX_Buffer_A[0] == 0x74) // all star?
         {

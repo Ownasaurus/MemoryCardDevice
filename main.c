@@ -27,7 +27,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "stream_buffer.h"
+#include "message_buffer.h"
 
 // lwIP
 #include "utils/lwiplib.h"
@@ -41,7 +41,6 @@ void ethernetTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void uart0Task(void *pvParameters);
 void EXISendTask(void *pvParameters);
-void EXIReceiveTask(void *pvParameters);
 
 // Other function prototypes
 void UART0_Begin();
@@ -50,12 +49,9 @@ void task_print(char* fmt, ...);
 void DisplayIPAddress(uint32_t ui32Addr);
 
 // FreeRTOS data structures
-StreamBufferHandle_t incomingEXIData;
-StreamBufferHandle_t outgoingUDPData;
+MessageBufferHandle_t outgoingUDPData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
-
-TaskHandle_t EXIReceiveTaskHandle;
 
 #define SYSTICK_INT_PRIORITY    0xE0 // priority 7
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
@@ -75,10 +71,8 @@ int main(void)
 
     // Create IPC structures
 
-    outgoingUDPData = xStreamBufferCreate(2048, 1); // length of 2048 should be more than enough. Size rarely breaks 1024.
+    outgoingUDPData = xMessageBufferCreate(4096); // length of 4096 should be more than enough. Size rarely breaks 1024. 2048 is hard max. plus 4 bytes per mesage length stored.
     ASSERT(outgoingUDPData != NULL);
-    incomingEXIData = xStreamBufferCreate(2048, 1); // length of 2048 should be more than enough. Size rarely breaks 1024.
-    ASSERT(incomingEXIData != NULL);
     outgoingEXIData = xQueueCreate(8, sizeof(struct pbuf *)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
     ASSERT(outgoingEXIData != NULL);
     printableData = xQueueCreate(8, 1024);
@@ -93,8 +87,6 @@ int main(void)
     creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 10240, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
-    ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXIReceiveTask, (const portCHAR *)"EXIReceive", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
@@ -195,48 +187,6 @@ void Ethernet_Begin()
     MAP_IntPrioritySet(FAULT_SYSTICK, SYSTICK_INT_PRIORITY);
 }
 
-void EXIReceiveTask(void *pvParameters)
-{
-    EXIReceiveTaskHandle = xTaskGetHandle("EXIReceive");
-    ASSERT(EXIReceiveTaskHandle != NULL);
-
-    uint8_t receivedBytes[4096]; // extra room in case of overflow, which shouldn't happen
-    uint8_t *currPtr = receivedBytes;
-    uint16_t currIndex = 0;
-
-    while(true)
-    {
-        size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, portMAX_DELAY); // blocks until data is available
-        taskENTER_CRITICAL();
-        if(sizeReceived != 0) // something was actually received
-        {
-            // update pointers
-            currIndex += sizeReceived;
-            currPtr += sizeReceived;
-        }
-
-        // this hopefully eliminates the possibility of a race condition. double check for remaining data
-        if(!xStreamBufferIsEmpty(incomingEXIData))
-        {
-            taskEXIT_CRITICAL();
-            continue;
-        }
-
-        // check if semaphore was set, meaning we're ready to flush
-        uint32_t ulNotifiedValue = ulTaskNotifyTake(pdTRUE, 0);
-        if(ulNotifiedValue != 0) // we actually got a notification
-        {
-            //if so, dump to ethernetTask
-            xStreamBufferSend(outgoingUDPData, &receivedBytes, currIndex, 0);
-
-            //reset buffers and buffer pointers
-            currPtr = receivedBytes;
-            currIndex = 0;
-        }
-        taskEXIT_CRITICAL();
-    }
-}
-
 // Callback when UDP data is received
 // NOTE: The callback function is responsible for deallocating the pbuf, but we pass this along to the EXISendTask function
 void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
@@ -290,25 +240,48 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
+    uint8_t messageReceived[1024];
     uint8_t fullMessageBuffer[2048];
+    uint8_t *messagePtr = fullMessageBuffer;
+    uint16_t messageIndex = 0;
     while(true)
     {
-        size_t sizeReceived = xStreamBufferReceive(outgoingUDPData, &fullMessageBuffer, 2048, portMAX_DELAY); // blocks until data is available
+        size_t sizeReceived = xMessageBufferReceive(outgoingUDPData, &messageReceived, 1024, portMAX_DELAY); // blocks until data is available
         if(sizeReceived == 0) // nothing was actually received
         {
             continue;
         }
-
-        p = pbuf_alloc(PBUF_TRANSPORT, sizeReceived, PBUF_REF);
-        p->payload = fullMessageBuffer;
-        p->len = sizeReceived;
-        err_t tempVal = udp_send(pcb_send, p);
-        if(tempVal != ERR_OK)
+        else if(sizeReceived == 1) // flush command
         {
-            // getting ERR_MEM for large packets
-            task_print("ERROR: Failed to SEND!\r\n");
+            p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
+            p->payload = fullMessageBuffer;
+            p->len = messageIndex;
+            err_t tempVal = udp_send(pcb_send, p);
+            if(tempVal != ERR_OK)
+            {
+                // getting ERR_MEM for large packets
+                task_print("ERROR: Failed to SEND!\r\n");
+            }
+            pbuf_free(p);
+
+            // reset message position
+            messagePtr = fullMessageBuffer;
+            messageIndex = 0;
         }
-        pbuf_free(p);
+        else // build up packet data
+        {
+            //CHECK FOR OVERFLOW
+            if(messageIndex + sizeReceived < 2048)
+            {
+                memcpy(messagePtr, messageReceived, sizeReceived);
+                messagePtr += sizeReceived;
+                messageIndex += sizeReceived;
+            }
+            else
+            {
+                task_print("ERROR: Overflow averted!\r\n");
+            }
+        }
     }
 
     udp_remove(pcb_send);
