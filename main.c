@@ -207,6 +207,7 @@ void EXIReceiveTask(void *pvParameters)
     while(true)
     {
         size_t sizeReceived = xStreamBufferReceive(incomingEXIData, currPtr, 2048, portMAX_DELAY); // blocks until data is available
+        taskENTER_CRITICAL();
         if(sizeReceived != 0) // something was actually received
         {
             // update pointers
@@ -214,7 +215,6 @@ void EXIReceiveTask(void *pvParameters)
             currPtr += sizeReceived;
         }
 
-        taskENTER_CRITICAL();
         // this hopefully eliminates the possibility of a race condition. double check for remaining data
         if(!xStreamBufferIsEmpty(incomingEXIData))
         {
@@ -223,8 +223,7 @@ void EXIReceiveTask(void *pvParameters)
         }
 
         // check if semaphore was set, meaning we're ready to flush
-        uint32_t ulNotifiedValue = ulTaskNotifyTake(pdFALSE, 0);
-        taskEXIT_CRITICAL();
+        uint32_t ulNotifiedValue = ulTaskNotifyTake(pdTRUE, 0);
         if(ulNotifiedValue != 0) // we actually got a notification
         {
             //if so, dump to ethernetTask
@@ -234,6 +233,7 @@ void EXIReceiveTask(void *pvParameters)
             currPtr = receivedBytes;
             currIndex = 0;
         }
+        taskEXIT_CRITICAL();
     }
 }
 
