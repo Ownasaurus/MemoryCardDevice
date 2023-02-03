@@ -198,7 +198,7 @@ void Q1IntHandler(void)
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     uint8_t TX_needs_resetting = 1;
 
-    // inactive one should be 1024 OR 0 (full or empty)
+    // inactive one should be size 1024
     uint32_t xferSizePrimary = MAP_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
     uint32_t xferSizeAlternate = MAP_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
 
@@ -210,6 +210,8 @@ void Q1IntHandler(void)
     }
     else if(xferSizePrimary == 1024) // primary has nothing, alternate has data
     {
+        MAP_uDMAChannelDisable(UDMA_CH14_SSI3RX);
+        ResetSSI3(); // flush
         // send the last bit of the ALTERNATE
         xHigherPriorityTaskWoken = pdFALSE;
         xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_B, (1024-xferSizeAlternate), &xHigherPriorityTaskWoken);
@@ -229,6 +231,8 @@ void Q1IntHandler(void)
     }
     else if(xferSizeAlternate == 1024) // primary has data, alternate has nothing
     {
+        MAP_uDMAChannelDisable(UDMA_CH14_SSI3RX);
+        ResetSSI3(); // flush
         // send the last bit of the PRIMARY
         xHigherPriorityTaskWoken = pdFALSE;
         xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);

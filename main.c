@@ -84,7 +84,7 @@ int main(void)
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 10240, NULL, 3, NULL);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
@@ -240,29 +240,32 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
-    uint8_t messageReceived[1024];
+    uint8_t messageReceived[2048];
     uint8_t fullMessageBuffer[2048];
     uint8_t *messagePtr = fullMessageBuffer;
     uint16_t messageIndex = 0;
     while(true)
     {
-        size_t sizeReceived = xMessageBufferReceive(outgoingUDPData, &messageReceived, 1024, portMAX_DELAY); // blocks until data is available
+        size_t sizeReceived = xMessageBufferReceive(outgoingUDPData, &messageReceived, 2048, portMAX_DELAY); // blocks until data is available
         if(sizeReceived == 0) // nothing was actually received
         {
             continue;
         }
         else if(sizeReceived == 1) // flush command
         {
-            p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
-            p->payload = fullMessageBuffer;
-            p->len = messageIndex;
-            err_t tempVal = udp_send(pcb_send, p);
-            if(tempVal != ERR_OK)
+            if(messageIndex > 0)
             {
-                // getting ERR_MEM for large packets
-                task_print("ERROR: Failed to SEND!\r\n");
+                p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
+                p->payload = fullMessageBuffer;
+                p->len = messageIndex;
+                err_t tempVal = udp_send(pcb_send, p);
+                if(tempVal != ERR_OK)
+                {
+                    // getting ERR_MEM for large packets
+                    task_print("ERROR: Failed to SEND!\r\n");
+                }
+                pbuf_free(p);
             }
-            pbuf_free(p);
 
             // reset message position
             messagePtr = fullMessageBuffer;
@@ -271,9 +274,9 @@ void ethernetTask(void *pvParameters)
         else // build up packet data
         {
             //CHECK FOR OVERFLOW
-            if(messageIndex + sizeReceived < 2048)
+            if(messageIndex + sizeReceived <= 2048)
             {
-                memcpy(messagePtr, messageReceived, sizeReceived);
+                memcpy(messagePtr, &messageReceived, sizeReceived);
                 messagePtr += sizeReceived;
                 messageIndex += sizeReceived;
             }
