@@ -1,14 +1,5 @@
-/*
- * Copyright (c) 2010 by Cristian Maglie <c.maglie@bug.st>
- * Copyright (c) 2022 by Christopher Dellman <christopher@dellman.net>
- * Copyright (c) 2022 by Ownasaurus <Ownasaurus@gmail.com>
- * SSI3DMASlave Master library for arduino.
- *
- * This file is free software; you can redistribute it and/or modify
- * it under the terms of either the GNU General Public License version 2
- * or the GNU Lesser General Public License version 2.1, both as
- * published by the Free Software Foundation.
- */
+// SSI3DMASlave.c
+// Ownasaurus
 
 #include <Payloads.h>
 #include <stdint.h>
@@ -31,109 +22,168 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "message_buffer.h"
 
-#include "DataPackage.h"
 #include "SSI3DMASlave.h"
 #include "main.h"
 
-extern QueueHandle_t incomingEXIData;
-DataPackage_t datapackage;
+extern MessageBufferHandle_t outgoingUDPData;
 
-//SPI Clock Speed
-#define SPI_CLOCK 8000000
+#define SPI_CLOCK_SPEED 8000000 // 8Mhz. GCN supports up to 32MHz, but this board can only do up to 10MHz as slave reliably
+#define DMA_SIZE 1024 // Max size of DMA transfers
 
-//*****************************************************************************
-//
-// The size of the memory transfer source and destination buffers (in words).
-//
-//*****************************************************************************
-#define SSI_BUFFER_SIZE       1024
-#define SSI_RX_BUFFER_COUNT   5
-#define SSI_TX_BUFFER_COUNT   5
+// buffers
+uint8_t Custom_TX_Buffer[DMA_SIZE];
+uint8_t TX_Buffer[DMA_SIZE];
+uint8_t RX_Buffer_A[DMA_SIZE];
+uint8_t RX_Buffer_B[DMA_SIZE];
+uint8_t customResponseSet = 0;
 
-//*****************************************************************************
-//
-// The SSI3 Buffers
-//
-//*****************************************************************************
-uint8_t g_ui8SSITxBuf[SSI_TX_BUFFER_COUNT][SSI_BUFFER_SIZE];
-uint8_t g_ui8SSIRxBuf[SSI_RX_BUFFER_COUNT][SSI_BUFFER_SIZE];
+// primary and alternate control tables
+#pragma DATA_ALIGN(uDMAControlTable, 1024)
+uint8_t uDMAControlTable[1024];
 
-//*****************************************************************************
-//
-// The Memory Control Variables
-//
-//*****************************************************************************
-uint32_t g_ui32MessageSizes[SSI_RX_BUFFER_COUNT];
-uint_fast8_t g_ui8RxWriteIndex = 0;
-uint_fast8_t g_ui8RxReadIndex = 0;
-
-volatile uint_fast8_t g_ui8TxWriteIndex = 0;
-volatile uint_fast8_t g_ui8TxReadIndex = 0;
-volatile bool g_ui8TXEmpty = true;
-
-//*****************************************************************************
-//
-// The count of uDMA errors.  This value is incremented by the uDMA error
-// handler.
-//
-//*****************************************************************************
-uint32_t g_ui32uDMAErrCount = 0;
-
-//*****************************************************************************
-//
-// The count of SSI3 buffers filled/read
-//
-//*****************************************************************************
-volatile uint32_t g_ui32SSIRxWriteCount = 0;
-volatile uint32_t g_ui32SSIRxReadCount = 0;
-// uint32_t g_ui32SSITxCount = 0;
-
-//*****************************************************************************
-//
-// The control table used by the uDMA controller.  This table must be aligned
-// to a 1024 byte boundary.
-//
-//*****************************************************************************
-#if defined(ewarm)
-#pragma data_alignment=1024
-uint8_t pui8ControlTable[1024];
-#elif defined(ccs)
-#pragma DATA_ALIGN(pui8ControlTable, 1024)
-uint8_t pui8ControlTable[1024];
-#else
-uint8_t pui8ControlTable[1024] __attribute__ ((aligned(1024)));
-#endif
-
-void uDMAErrorHandler(void)
+// Initialization function
+void SSI3_Init_SPI_0_0()
 {
-  uint32_t ui32Status;
+    // ----- Enable SSI3 -----
 
-  //
-  // Check for uDMA error bit
-  //
-  ui32Status = ROM_uDMAErrorStatusGet();
+    // Enable the relevant peripherals for SSI3 & uDMA functionality
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI3);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOQ);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
 
-  //
-  // If there is a uDMA error, then clear the error and increment
-  // the error counter.
-  //
-  if (ui32Status)
-  {
-    ROM_uDMAErrorStatusClear();
-    g_ui32uDMAErrCount++;
-  }
+    // Properly configure all four SSI3 pins
+    MAP_GPIOPinConfigure(GPIO_PQ0_SSI3CLK);
+    MAP_GPIOPinConfigure(GPIO_PQ1_SSI3FSS);
+    MAP_GPIOPinConfigure(GPIO_PQ2_SSI3XDAT0);
+    MAP_GPIOPinConfigure(GPIO_PQ3_SSI3XDAT1);
+    MAP_GPIOPinTypeSSI(GPIO_PORTQ_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
+
+    // Set and enable SPI slave mode operating at 8MHz, with uDMA
+    MAP_SSIConfigSetExpClk(SSI3_BASE, SYSTEM_CLOCK, SSI_FRF_MOTO_MODE_0, SSI_MODE_SLAVE, SPI_CLOCK_SPEED / 12, 8);
+    MAP_SSIEnable(SSI3_BASE);
+    MAP_SSIDMAEnable(SSI3_BASE, SSI_DMA_RX | SSI_DMA_TX);
+
+    // ----- Enable DMA -----
+
+    // Enable the uDMA controller.
+    MAP_uDMAEnable();
+
+    //Assign DMA channels to SSI3
+    MAP_uDMAChannelAssign(UDMA_CH14_SSI3RX);
+    MAP_uDMAChannelAssign(UDMA_CH15_SSI3TX);
+
+    // Set control table
+    MAP_uDMAControlBaseSet(uDMAControlTable);
+
+    // Configure Tx for basic mode
+    MAP_uDMAChannelAttributeDisable(UDMA_CH15_SSI3TX, UDMA_ATTR_ALTSELECT | UDMA_ATTR_HIGH_PRIORITY | UDMA_ATTR_REQMASK);
+    MAP_uDMAChannelControlSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE | UDMA_ARB_4);
+    MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
+                               (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+
+    // Prefill default transmit buffer with 0x00 and mem card identity response
+    // first bytes [0] and [1] the command being sent, and the bytes are not being read by the GCN
+    // response bytes [2] [3] [4] [5] are the reply
+    // Some sort of USB adapter is 0x04060000
+    TX_Buffer[2] = 4;
+    TX_Buffer[3] = 6;
+    TX_Buffer[4] = 0;
+    TX_Buffer[5] = 0;
+    MAP_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+
+    // Configure Rx for ping-pong mode
+    MAP_uDMAChannelAttributeDisable(UDMA_CH14_SSI3RX, UDMA_ATTR_USEBURST | UDMA_ATTR_ALTSELECT | (UDMA_ATTR_HIGH_PRIORITY | UDMA_ATTR_REQMASK));
+    MAP_uDMAChannelControlSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 | UDMA_ARB_4);
+    MAP_uDMAChannelControlSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 | UDMA_ARB_4);
+    MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                               RX_Buffer_A, sizeof(RX_Buffer_A));
+    MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                               RX_Buffer_B, sizeof(RX_Buffer_B));
+    MAP_uDMAChannelEnable(UDMA_CH14_SSI3RX);
+
+    // ----- Enable Interrupts -----
+
+    MAP_IntEnable(INT_UDMAERR); // enable dma error interrupts
+    MAP_SSIIntDisable(SSI3_BASE, SSI_DMATX | SSI_DMARX | SSI_TXEOT | SSI_TXFF | SSI_RXFF | SSI_RXTO | SSI_RXOR); // start with a clean slate
+    MAP_SSIIntEnable(SSI3_BASE, SSI_DMATX | SSI_DMARX); // enable DMA transfer complete and Rx timeout interrupts
+    MAP_IntPrioritySet(INT_SSI3, 0xA0); // priority 5
+    MAP_IntEnable(INT_SSI3); // enable SSI3 interrupts in general
+
+    MAP_GPIOIntTypeSet(GPIO_PORTQ_BASE, GPIO_PIN_1, GPIO_RISING_EDGE | GPIO_DISCRETE_INT); // signifies SPI transfer complete
+    MAP_IntPrioritySet(INT_GPIOQ1, 0xA0); // priority 5
+    MAP_GPIOIntEnable(GPIO_PORTQ_BASE, GPIO_INT_PIN_1); // enable interrupts on this pin
+    MAP_IntEnable(INT_GPIOQ1); // enable the actual interrupt
 }
 
-void ResetSSI3()
+void ResetSSI3(void)
 {
-    ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_SSI3);
+    // https://e2e.ti.com/support/microcontrollers/arm-based-microcontrollers-group/arm-based-microcontrollers/f/arm-based-microcontrollers-forum/319424/ssi-buffer-reset
+    MAP_SysCtlPeripheralReset(SYSCTL_PERIPH_SSI3);
 
-    ROM_SSIConfigSetExpClk(SSI3_BASE, SYSTEM_CLOCK, SSI_FRF_MOTO_MODE_0,
-                         SSI_MODE_SLAVE, SPI_CLOCK / 12, 8);
+    MAP_SSIConfigSetExpClk(SSI3_BASE, SYSTEM_CLOCK, SSI_FRF_MOTO_MODE_0,
+                         SSI_MODE_SLAVE, SPI_CLOCK_SPEED / 12, 8);
 
-    ROM_SSIEnable(SSI3_BASE);
-    ROM_SSIDMAEnable(SSI3_BASE, SSI_DMA_RX | SSI_DMA_TX);
+    MAP_SSIEnable(SSI3_BASE);
+    MAP_SSIIntEnable(SSI3_BASE, SSI_DMATX | SSI_DMARX);
+    MAP_IntPrioritySet(INT_SSI3, 0xA0);
+    MAP_IntEnable(INT_SSI3);
+    MAP_SSIDMAEnable(SSI3_BASE, SSI_DMA_RX | SSI_DMA_TX);
+}
+
+void SSI3IntHandler(void)
+{
+    // Clear interrupt flag
+    uint32_t ui32Status;
+    ui32Status = MAP_SSIIntStatus(SSI3_BASE, 1);
+    if(ui32Status & SSI_DMARX) // DMA Rx done
+    {
+        MAP_SSIIntClear(SSI3_BASE, SSI_DMARX);
+    }
+    if(ui32Status & SSI_DMATX) // DMA Tx done
+    {
+        MAP_SSIIntClear(SSI3_BASE, SSI_DMATX);
+    }
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // DMA is complete, so get it ready to go again
+
+    // Ready the next Rx buffer
+    ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
+
+    if(ui32Status == UDMA_MODE_STOP) // buffer A is done with a transfer
+    {
+        // Copy/send contents of A
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, sizeof(RX_Buffer_A), &xHigherPriorityTaskWoken);
+
+        // So set up A for next time!
+        MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                       RX_Buffer_A, sizeof(RX_Buffer_A));
+    }
+
+    ui32Status = MAP_uDMAChannelModeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
+
+    if(ui32Status == UDMA_MODE_STOP) // buffer B is done with a transfer
+    {
+        // Copy/send contents of B
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_B, sizeof(RX_Buffer_B), &xHigherPriorityTaskWoken);
+
+        // So set up B for next time!
+        MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                       RX_Buffer_B, sizeof(RX_Buffer_B));
+    }
+
+    // Ready the next Tx buffer
+    if(!MAP_uDMAChannelIsEnabled(UDMA_CH15_SSI3TX))
+    {
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
+                                       (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+        MAP_uDMAChannelEnable(UDMA_CH15_SSI3TX);
+    }
 }
 
 //*****************************************************************************
@@ -141,279 +191,133 @@ void ResetSSI3()
 // CS Rising Edge Interrupt Handler
 //
 //*****************************************************************************
-void gpioQ1IntHandler(void) {
-  uint32_t ui32Status;
+void Q1IntHandler(void)
+{
+    // Clear CS_n interrupt flag
+    uint32_t ui32Status;
+    ui32Status = MAP_GPIOIntStatus(GPIO_PORTQ_BASE, 1);
+    MAP_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
 
-  ui32Status = ROM_GPIOIntStatus(GPIO_PORTQ_BASE, 1);
-  ROM_GPIOIntClear(GPIO_PORTQ_BASE, ui32Status);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    uint8_t TX_needs_resetting = 1;
 
-  bool cs_n = GPIOPinRead(GPIO_PORTQ_BASE, GPIO_PIN_1);
+    // inactive one should be size 1024
+    uint32_t xferSizePrimary = MAP_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
+    uint32_t xferSizeAlternate = MAP_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT);
 
-  if (cs_n) { //Rising edge
-    // handle special cases that are time-sensitive
-    if(g_ui8SSIRxBuf[g_ui8RxWriteIndex][0] == 0x74) // All star request
+    // disable DMA
+    MAP_uDMAChannelDisable(UDMA_CH14_SSI3RX);
+    MAP_uDMAChannelDisable(UDMA_CH15_SSI3TX);
+
+    // flush FIFOs
+    ResetSSI3();
+
+    // handle the data received appropriately
+    if(xferSizePrimary == 1024 && xferSizeAlternate == 1024) // edge case where neither has data left
     {
-        ROM_uDMAChannelDisable(UDMA_CH15_SSI3TX);
+        // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
+    }
+    else if(xferSizePrimary == 1024) // primary has nothing, alternate has data
+    {
+        // send the last bit of the ALTERNATE
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_B, (1024-xferSizeAlternate), &xHigherPriorityTaskWoken);
+
+        // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
+
+        if(RX_Buffer_B[0] == 0x74) // all star?
+        {
+            TX_needs_resetting = 2;
+        }
+        else if(RX_Buffer_B[0] == 0x75) // adventure mode?
+        {
+            TX_needs_resetting = 3;
+        }
+    }
+    else if(xferSizeAlternate == 1024) // primary has data, alternate has nothing
+    {
+        // send the last bit of the PRIMARY
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, (1024-xferSizePrimary), &xHigherPriorityTaskWoken);
+
+        // notify ethernet function that our frame is done
+        xHigherPriorityTaskWoken = pdFALSE;
+        xMessageBufferSendFromISR(outgoingUDPData, &RX_Buffer_A, 1, &xHigherPriorityTaskWoken);
+
+        if(RX_Buffer_A[0] == 0x74) // all star?
+        {
+            TX_needs_resetting = 2;
+        }
+        else if(RX_Buffer_A[0] == 0x75) // adventure mode?
+        {
+            TX_needs_resetting = 3;
+        }
+    }
+    else // both transfers are in-process? should be impossible!
+    {
+        // should never get here
+    }
+
+    // reset the Rx DMA transfers
+    MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                           RX_Buffer_A, sizeof(RX_Buffer_A));
+    MAP_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_ALT_SELECT, UDMA_MODE_PINGPONG, (void *)(SSI3_BASE + SSI_O_DR),
+                                           RX_Buffer_B, sizeof(RX_Buffer_B));
+
+    // reset the Tx DMA transfers
+    if(TX_needs_resetting == 1) // default
+    {
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
+                                       (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+    }
+    else if(TX_needs_resetting == 2) // all star?
+    {
         ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
                                                UDMA_MODE_BASIC, allstar_data,
                                                (void *)(SSI3_BASE + SSI_O_DR),
                                                sizeof(allstar_data));
-        ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
-        ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-        g_ui32SSIRxWriteCount++;
-        return;
     }
-    else if(g_ui8SSIRxBuf[g_ui8RxWriteIndex][0] == 0x75) // Adventure mode
+    else if(TX_needs_resetting == 3) // adventure?
     {
-        ROM_uDMAChannelDisable(UDMA_CH15_SSI3TX);
         ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
                                                UDMA_MODE_BASIC, adventure_data,
                                                (void *)(SSI3_BASE + SSI_O_DR),
                                                sizeof(adventure_data));
-        ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
-        ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-        g_ui32SSIRxWriteCount++;
-        return;
     }
-
-    uint32_t xferSize = ROM_uDMAChannelSizeGet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT);
-
-    //Get the size of the completed transfer
-    uint32_t msgSize = SSI_BUFFER_SIZE - xferSize;
-    g_ui32MessageSizes[g_ui8RxWriteIndex] = msgSize;
-
-    // ------Share over UDP----------
-    if(msgSize > 0)
+    else if(customResponseSet == 1) // data received from UDP is lower priority
     {
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-        datapackage.addr = &g_ui8SSIRxBuf[g_ui8RxWriteIndex];
-        datapackage.numBytes = msgSize;
-        xQueueSendFromISR(incomingEXIData, &datapackage, &xHigherPriorityTaskWoken);
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, Custom_TX_Buffer,
+                                               (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+        customResponseSet = 0;
     }
-    // ------------------------------
 
-    //Move current rx write index to the next buffer
-    g_ui8RxWriteIndex = (g_ui8RxWriteIndex + 1) % SSI_RX_BUFFER_COUNT;
-
-    //At this point, an index collision should not be possible (due to the CSn
-    //falling edge increment), so index equality means empty
-    if (g_ui8TxReadIndex == g_ui8TxWriteIndex)
-      g_ui8TXEmpty = true;
-
-    ROM_uDMAChannelDisable(UDMA_CH14_SSI3RX);
-    ROM_uDMAChannelDisable(UDMA_CH15_SSI3TX);
-
-    //Enable DMA channel to write in the next buffer position
-    ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT,
-                               UDMA_MODE_BASIC,
-                               (void *)(SSI3_BASE + SSI_O_DR),
-                               g_ui8SSIRxBuf[g_ui8RxWriteIndex], sizeof(g_ui8SSIRxBuf[g_ui8RxWriteIndex]));
-
-    ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
-                                   UDMA_MODE_BASIC, g_ui8SSITxBuf[g_ui8TxReadIndex],
-                                   (void *)(SSI3_BASE + SSI_O_DR),
-                                   sizeof(g_ui8SSITxBuf[g_ui8TxReadIndex]));
-
-    ResetSSI3(); // resetting SSI3 forces the Tx and Rx FIFOs to flush/clear
-
-    ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
+    // re-enable DMA
+    MAP_uDMAChannelEnable(UDMA_CH14_SSI3RX);
     ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
-
-    //Increment receive count
-    g_ui32SSIRxWriteCount++;
-  }
-  else { //Falling edge
-    //It is necessary to increment the read pointer here to avoid a race with the data queue logic
-    //as the placement of the index accounting at the CSn rising edge could cause new data to drop
-
-    //Update TX head
-    g_ui8TxReadIndex = (g_ui8TxReadIndex + 1) % SSI_TX_BUFFER_COUNT;
-  }
 }
 
-void ConfigureSSI3() {
-  //
-  // Enable the SSI3 Peripheral.
-  //
-  ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI3);
-  ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOQ);
+// callback if an uDMA error occurs
+void uDMAErrorHandler(void)
+{
+    static uint32_t uDMAErrCount = 0;
 
-  // Configure GPIO Pins for SSI3 mode.
-  //
-  ROM_GPIOPinConfigure(GPIO_PQ0_SSI3CLK);
-  ROM_GPIOPinConfigure(GPIO_PQ1_SSI3FSS);
-  ROM_GPIOPinConfigure(GPIO_PQ2_SSI3XDAT0);
-  ROM_GPIOPinConfigure(GPIO_PQ3_SSI3XDAT1);
-  ROM_GPIOPinTypeSSI(GPIO_PORTQ_BASE, GPIO_PIN_3 | GPIO_PIN_2 | GPIO_PIN_1 | GPIO_PIN_0);
+    uint32_t ui32Status;
 
-  ResetSSI3();
-}
+    ui32Status = MAP_uDMAErrorStatusGet();
 
-void ConfigureDMA() {
-  //Enable uDMA
-  ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
-
-  //Register DMA interrupt to handler
-  IntRegister(INT_UDMAERR, uDMAErrorHandler);
-
-  //Enable interrupt
-  ROM_IntEnable(INT_UDMAERR);
-
-  // Enable the uDMA controller.
-  ROM_uDMAEnable();
-
-  // Point at the control table to use for channel control structures.
-  ROM_uDMAControlBaseSet(pui8ControlTable);
-
-  //Assign DMA channels to SSI3
-  ROM_uDMAChannelAssign(UDMA_CH14_SSI3RX);
-  ROM_uDMAChannelAssign(UDMA_CH15_SSI3TX);
-
-  // Put the attributes in a known state for the uDMA SSI0RX channel.  These
-  // should already be disabled by default.
-  ROM_uDMAChannelAttributeDisable(UDMA_CH14_SSI3RX, UDMA_ATTR_USEBURST | UDMA_ATTR_ALTSELECT |
-                                  (UDMA_ATTR_HIGH_PRIORITY | UDMA_ATTR_REQMASK));
-
-  // Configure the control parameters for the primary control structure for
-  // the SSIORX channel.
-  ROM_uDMAChannelControlSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT,
-                            UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 |
-                            UDMA_ARB_4);
-
-
-  //Enable DMA channel to write in the next buffer position
-  ROM_uDMAChannelTransferSet(UDMA_CH14_SSI3RX | UDMA_PRI_SELECT,
-                             UDMA_MODE_BASIC,
-                             (void *)(SSI3_BASE + SSI_O_DR),
-                             g_ui8SSIRxBuf[g_ui8RxWriteIndex], sizeof(g_ui8SSIRxBuf[g_ui8RxWriteIndex]));
-
-  // Configure TX
-
-  //
-  // Put the attributes in a known state for the uDMA SSI0TX channel.  These
-  // should already be disabled by default.
-  //
-  ROM_uDMAChannelAttributeDisable(UDMA_CH15_SSI3TX,
-                                  UDMA_ATTR_ALTSELECT |
-                                  UDMA_ATTR_HIGH_PRIORITY |
-                                  UDMA_ATTR_REQMASK);
-
-  //
-  // Configure the control parameters for the primary control structure for
-  // the SSIORX channel.
-  //
-  ROM_uDMAChannelControlSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
-                            UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE |
-                            UDMA_ARB_4);
-
-  //Prefill buffers with 0x00 and mem card identity response
-  size_t i, j;
-  for (i = 0; i < SSI_TX_BUFFER_COUNT; i++)
-  {
-    for (j = 0; j < sizeof(g_ui8SSITxBuf[i]); j++)
+    if (ui32Status)
     {
-        g_ui8SSITxBuf[i][j] = 0;
+        MAP_uDMAErrorStatusClear();
+        uDMAErrCount++;
     }
-
-    // set mem card response
-    // first bytes [0] and [1] the command being sent
-    // response bytes [2] [3] [4] [5] are the reply
-    // Some sort of USB adapter is 0x04060000
-    // therefore set [2] to 0x04 and [3] to 06
-    g_ui8SSITxBuf[i][2] = 0x04;
-    g_ui8SSITxBuf[i][3] = 0x06;
-  }
-
-  //Enable DMA channel to write in the next buffer position
-  ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
-                             UDMA_MODE_BASIC, g_ui8SSITxBuf[g_ui8TxReadIndex],
-                             (void *)(SSI3_BASE + SSI_O_DR),
-                             sizeof(g_ui8SSITxBuf[g_ui8TxReadIndex]));
-
-  ROM_uDMAChannelEnable(UDMA_CH14_SSI3RX);
-  ROM_uDMAChannelEnable(UDMA_CH15_SSI3TX);
 }
 
-void ConfigureCSInterrupt() {
-  IntRegister(INT_GPIOQ1, gpioQ1IntHandler);
-  ROM_GPIOIntTypeSet(GPIO_PORTQ_BASE, GPIO_PIN_1, GPIO_BOTH_EDGES | GPIO_DISCRETE_INT);
-  ROM_IntPrioritySet(INT_GPIOQ1, 0xA0); // priority 5
-  ROM_GPIOIntEnable(GPIO_PORTQ_BASE, GPIO_INT_PIN_1);
-  ROM_IntEnable(INT_GPIOQ1);
-}
-
-void SSI3_Begin() {
-  ConfigureSSI3();
-  ConfigureDMA();
-  ConfigureCSInterrupt();
-
-  InitPayloadData();
-}
-
-void SSI3_End() {
-  ROM_SSIDisable(SSI3_BASE);
-}
-
-bool SSI3_IsMessageAvailable() {
-  return g_ui32SSIRxWriteCount > g_ui32SSIRxReadCount;
-}
-
-uint32_t SSI3_GetMessageSize() {
-  return g_ui32MessageSizes[g_ui8RxReadIndex];
-}
-
-uint8_t* SSI3_PopMessage() {
-  uint8_t readIndex = g_ui8RxReadIndex;
-
-  //Increment read index, keep between 0 and buffer count
-  g_ui8RxReadIndex++;
-  if (g_ui8RxReadIndex >= SSI_RX_BUFFER_COUNT) g_ui8RxReadIndex = 0;
-
-  g_ui32SSIRxReadCount++; //Increment read count
-
-  //Return pointer to array containing the message to read
-  return g_ui8SSIRxBuf[readIndex];
-}
-
-//queueResponse prepares from 1 to SSI_TX_BUFFER_COUNT messages for the
-//EXI channel to read. These are done in fixed size 1024 byte transfers
-//so a requested length of >1K will result in messages which need multiple
-//EXI transfers to fully retrieve
-
-//FIXME: Initiating an EXI transaction on an empty queue while starting to
-//queue data is possibly UNDEFINED. The user CSn handler was changed to
-//improve the index accounting, but it needs testing
-int SSI3_QueueResponse(uint8_t* data, size_t length) {
-  size_t neededBuffers = (length / SSI_BUFFER_SIZE) + 1;
-
-  if (neededBuffers > SSI_TX_BUFFER_COUNT)
-    return -1;
-
-  //BEGIN CRITICAL SECTION
-  UBaseType_t savedISRState = taskENTER_CRITICAL_FROM_ISR();
-
-  //TODO: review logic here
-  if(!g_ui8TXEmpty && g_ui8TxWriteIndex == g_ui8TxReadIndex)
-  {
-    taskEXIT_CRITICAL_FROM_ISR(savedISRState);
-    return -2; //Write will overflow
-  }
-
-  size_t i;
-  for (i = 0; i < neededBuffers; i++) {
-    memcpy(g_ui8SSITxBuf[g_ui8TxWriteIndex], data + (i * SSI_BUFFER_SIZE), length % SSI_BUFFER_SIZE);
-    //Update RX head
-    g_ui8TxWriteIndex = (g_ui8TxWriteIndex + 1) % SSI_TX_BUFFER_COUNT;
-    g_ui8TXEmpty = false;
-    if (length > SSI_BUFFER_SIZE)
-      length -= SSI_BUFFER_SIZE;
-  }
-
-  //END CRITICAL SECTION
-  taskEXIT_CRITICAL_FROM_ISR(savedISRState);
-  //You might be tempted to move the critical section end before the memcpy, but that's a bad idea as
-  //the buffer empty accounting is interrupt mediated with the user CSn logic instead of having the
-  //DMA engine itself do buffer management. Moving the critical section will introduce a race.
-
-  return 0;
+void SSI3QueueResponse(uint8_t* responseData, size_t length)
+{
+    memcpy(Custom_TX_Buffer, responseData, length);
+    customResponseSet = 1;
 }

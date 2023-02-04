@@ -34,7 +34,6 @@
 
 // Other
 #include "SSI3DMASlave.h"
-#include "DataPackage.h"
 #include <Payloads.h>
 
 // Task function prototypes
@@ -50,12 +49,14 @@ void task_print(char* fmt, ...);
 void DisplayIPAddress(uint32_t ui32Addr);
 
 // FreeRTOS data structures
-QueueHandle_t incomingEXIData;
+MessageBufferHandle_t outgoingUDPData;
 QueueHandle_t outgoingEXIData;
 QueueHandle_t printableData;
 
 #define SYSTICK_INT_PRIORITY    0xE0 // priority 7
 #define ETHERNET_INT_PRIORITY   0xC0 // priority 6
+
+#define MESSAGE_BUFFER_SIZE 2048
 
 int main(void)
 {
@@ -69,8 +70,9 @@ int main(void)
     UARTprintf("UART0 Initialized.\r\n");
 
     // Create IPC structures
-    incomingEXIData = xQueueCreate(8, sizeof(DataPackage_t)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
-    ASSERT(incomingEXIData != NULL);
+
+    outgoingUDPData = xMessageBufferCreate(4096); // length of 4096 should be more than enough. Size rarely breaks 1024. 2048 is hard max. plus 4 bytes per mesage length stored.
+    ASSERT(outgoingUDPData != NULL);
     outgoingEXIData = xQueueCreate(8, sizeof(struct pbuf *)); // length of 8 should be more than enough. size of 8 bytes = 4 for address + 4 for data length
     ASSERT(outgoingEXIData != NULL);
     printableData = xQueueCreate(8, 1024);
@@ -78,13 +80,13 @@ int main(void)
 
     // Create tasks
     BaseType_t creationResult;
-    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 8192, NULL, 1, NULL);
+    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, NULL);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXI", 8192, NULL, 4, NULL);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
@@ -104,16 +106,16 @@ void Ethernet_Begin()
     //
     // this app wants to configure for ethernet LED function.
     //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-    ROM_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
-    ROM_GPIOPinConfigure(GPIO_PF4_EN0LED1);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    MAP_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
+    MAP_GPIOPinConfigure(GPIO_PF4_EN0LED1);
 
     GPIOPinTypeEthernetLED(GPIO_PORTF_BASE, GPIO_PIN_0 | GPIO_PIN_4);
 
     //
     // Configure Port N1 for as an output for the animation LED.
     //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
     MAP_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
 
     //
@@ -190,11 +192,7 @@ void Ethernet_Begin()
 void udp_data_received(void * args, struct udp_pcb * upcb, struct pbuf * p, const ip_addr_t * addr, u16_t port)
 {
     // pass the byte pbuf to EXISendTask
-    //BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    //task_print(p->payload);
-    //xQueueSendFromISR(outgoingEXIData, &p, &xHigherPriorityTaskWoken); //send to our exi send task.
     xQueueSend(outgoingEXIData, &p, 0); //send to our exi send task.
-    //pbuf_free(p); // previously-deferred free
 }
 
 // Task which handles all outgoing UDP communication
@@ -220,7 +218,6 @@ void ethernetTask(void *pvParameters)
 
     struct udp_pcb *pcb_send, *pcb_receive;
     struct pbuf *p;
-    DataPackage_t datapackage;
 
     pcb_send = udp_new();
     configASSERT(pcb_send != NULL);
@@ -243,22 +240,50 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
+    uint8_t messageReceived[2048];
+    uint8_t fullMessageBuffer[2048];
+    uint8_t *messagePtr = fullMessageBuffer;
+    uint16_t messageIndex = 0;
     while(true)
     {
-        size_t sizeReceived = xQueueReceive(incomingEXIData, &datapackage, portMAX_DELAY); // blocks until data is available
+        size_t sizeReceived = xMessageBufferReceive(outgoingUDPData, &messageReceived, 2048, portMAX_DELAY); // blocks until data is available
         if(sizeReceived == 0) // nothing was actually received
         {
             continue;
         }
-
-        p = pbuf_alloc(PBUF_TRANSPORT, datapackage.numBytes, PBUF_REF);
-        p->payload = datapackage.addr;
-        p->len = datapackage.numBytes;
-        if(udp_send(pcb_send, p) != ERR_OK)
+        else if(sizeReceived == 1) // flush command
         {
-            task_print("ERROR: Failed to SEND!\r\n");
+            if(messageIndex > 0) // make sure we have actual data to send
+            {
+                p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
+                p->payload = fullMessageBuffer;
+                p->len = messageIndex;
+                err_t tempVal = udp_send(pcb_send, p);
+                if(tempVal != ERR_OK)
+                {
+                    task_print("ERROR: Failed to SEND!\r\n");
+                }
+                pbuf_free(p);
+            }
+
+            // reset message position
+            messagePtr = fullMessageBuffer;
+            messageIndex = 0;
         }
-        pbuf_free(p);
+        else // build up packet data
+        {
+            //CHECK FOR OVERFLOW before moving data
+            if(messageIndex + sizeReceived <= 2048)
+            {
+                memcpy(messagePtr, &messageReceived, sizeReceived);
+                messagePtr += sizeReceived;
+                messageIndex += sizeReceived;
+            }
+            else
+            {
+                task_print("ERROR: Overflow averted!\r\n");
+            }
+        }
     }
 
     udp_remove(pcb_send);
@@ -269,7 +294,7 @@ void ethernetTask(void *pvParameters)
 void EXISendTask(void *pvParameters)
 {
     // Initialize the SSI3 peripheral for SPI(0,0)
-    SSI3_Begin();
+    SSI3_Init_SPI_0_0();
     task_print("SSI3 Initialized.\r\n");
 
     struct pbuf *p;
@@ -285,16 +310,12 @@ void EXISendTask(void *pvParameters)
         size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
 
         // debug prints to UART0
-        task_print("UDP Rx: %s\r\n", p->payload);
+        //task_print("UDP Rx: %s\r\n", p->payload);
 
         // normal EXI behavior
-        int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
+        SSI3QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
         pbuf_free(p); // previously-deferred free
 
-        if(retval != 0)
-        {
-            task_print("ERROR: Could not queue EXI reply. Write will overflow!\r\n");
-        }
     }
 }
 
@@ -321,10 +342,10 @@ void task_print(char* fmt, ...)
 // Initialize UART0
 void UART0_Begin()
 {
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
-    ROM_GPIOPinConfigure(GPIO_PA0_U0RX);
-    ROM_GPIOPinConfigure(GPIO_PA1_U0TX);
-    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    MAP_GPIOPinConfigure(GPIO_PA0_U0RX);
+    MAP_GPIOPinConfigure(GPIO_PA1_U0TX);
+    MAP_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
 
     UARTStdioConfig(0, 115200, SYSTEM_CLOCK);
 }

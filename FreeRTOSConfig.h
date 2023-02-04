@@ -85,7 +85,7 @@ supported, or if both static and dynamic allocation are supported. */
 #define configMINIMAL_STACK_SIZE				( ( uint16_t ) 200 )
 #define configMAX_TASK_NAME_LEN					( 12 )
 
-#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 180 * 1024 ) )
+#define configTOTAL_HEAP_SIZE					( ( size_t ) ( 230 * 1024 ) )
 
 /* Constants that build features in or out. */
 #define configUSE_MUTEXES						1
@@ -132,6 +132,7 @@ referenced anyway. */
 #define INCLUDE_eTaskGetState					1
 #define INCLUDE_xTaskResumeFromISR				0
 #define INCLUDE_xTaskGetCurrentTaskHandle		1
+#define INCLUDE_xTaskGetHandle                  1
 #define INCLUDE_xTaskGetSchedulerState			0
 #define INCLUDE_xSemaphoreGetMutexHolder		0
 #define INCLUDE_xTimerPendFunctionCall			1
