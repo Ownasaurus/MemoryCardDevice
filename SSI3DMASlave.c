@@ -32,9 +32,11 @@ extern MessageBufferHandle_t outgoingUDPData;
 #define DMA_SIZE 1024 // Max size of DMA transfers
 
 // buffers
+uint8_t Custom_TX_Buffer[DMA_SIZE];
 uint8_t TX_Buffer[DMA_SIZE];
 uint8_t RX_Buffer_A[DMA_SIZE];
 uint8_t RX_Buffer_B[DMA_SIZE];
+uint8_t customResponseSet = 0;
 
 // primary and alternate control tables
 #pragma DATA_ALIGN(uDMAControlTable, 1024)
@@ -285,6 +287,12 @@ void Q1IntHandler(void)
                                                (void *)(SSI3_BASE + SSI_O_DR),
                                                sizeof(adventure_data));
     }
+    else if(customResponseSet == 1) // data received from UDP is lower priority
+    {
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, Custom_TX_Buffer,
+                                               (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+        customResponseSet = 0;
+    }
 
     // re-enable DMA
     MAP_uDMAChannelEnable(UDMA_CH14_SSI3RX);
@@ -305,4 +313,10 @@ void uDMAErrorHandler(void)
         MAP_uDMAErrorStatusClear();
         uDMAErrCount++;
     }
+}
+
+void SSI3QueueResponse(uint8_t* responseData, size_t length)
+{
+    memcpy(Custom_TX_Buffer, responseData, length);
+    customResponseSet = 1;
 }

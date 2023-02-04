@@ -307,20 +307,15 @@ void EXISendTask(void *pvParameters)
             continue;
         }
 
-        //size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
+        size_t length = p->len > 1024 ? 1024 : p->len; // limit len to 1024
 
         // debug prints to UART0
-        task_print("UDP Rx: %s\r\n", p->payload);
+        //task_print("UDP Rx: %s\r\n", p->payload);
 
-        //TODO: restore original behavior before main merge
         // normal EXI behavior
-        //int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
+        SSI3QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
         pbuf_free(p); // previously-deferred free
 
-        /*if(retval != 0)
-        {
-            task_print("ERROR: Could not queue EXI reply. Write will overflow!\r\n");
-        }*/
     }
 }
 
