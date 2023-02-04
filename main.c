@@ -253,7 +253,7 @@ void ethernetTask(void *pvParameters)
         }
         else if(sizeReceived == 1) // flush command
         {
-            if(messageIndex > 0)
+            if(messageIndex > 0) // make sure we have actual data to send
             {
                 p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
                 p->payload = fullMessageBuffer;
@@ -261,7 +261,6 @@ void ethernetTask(void *pvParameters)
                 err_t tempVal = udp_send(pcb_send, p);
                 if(tempVal != ERR_OK)
                 {
-                    // getting ERR_MEM for large packets
                     task_print("ERROR: Failed to SEND!\r\n");
                 }
                 pbuf_free(p);
@@ -273,7 +272,7 @@ void ethernetTask(void *pvParameters)
         }
         else // build up packet data
         {
-            //CHECK FOR OVERFLOW
+            //CHECK FOR OVERFLOW before moving data
             if(messageIndex + sizeReceived <= 2048)
             {
                 memcpy(messagePtr, &messageReceived, sizeReceived);
@@ -313,6 +312,7 @@ void EXISendTask(void *pvParameters)
         // debug prints to UART0
         task_print("UDP Rx: %s\r\n", p->payload);
 
+        //TODO: restore original behavior before main merge
         // normal EXI behavior
         //int retval = SSI3_QueueResponse((uint8_t*)p->payload, length); // queue up response for next EXI transfer
         pbuf_free(p); // previously-deferred free
