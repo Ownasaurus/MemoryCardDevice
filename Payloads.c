@@ -1,9 +1,5 @@
-/*
- * Payloads.c
- *
- *  Created on: Aug 28, 2022
- *      Author: Justin
- */
+// Payloads.c
+// Ownasaurus
 
 #include <stdint.h>
 #include <string.h>

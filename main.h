@@ -1,9 +1,5 @@
-/*
- * main.h
- *
- *  Created on: Mar 28, 2015
- *      Author: akobyljanec
- */
+// main.h
+// Ownasaurus
 
 #ifndef MAIN_H_
 #define MAIN_H_

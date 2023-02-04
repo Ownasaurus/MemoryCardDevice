@@ -1,9 +1,5 @@
-/*
- * AllStarPayload.h
- *
- *  Created on: Aug 23, 2022
- *      Author: Owna
- */
+// Payloads.h
+// Ownasaurus
 
 #ifndef PAYLOADS_H_
 #define PAYLOADS_H_
