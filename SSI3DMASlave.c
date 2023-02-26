@@ -269,12 +269,7 @@ void Q1IntHandler(void)
                                            RX_Buffer_B, sizeof(RX_Buffer_B));
 
     // reset the Tx DMA transfers
-    if(TX_needs_resetting == 1) // default
-    {
-        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
-                                       (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
-    }
-    else if(TX_needs_resetting == 2) // all star?
+    if(TX_needs_resetting == 2) // all star?
     {
         ROM_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT,
                                                UDMA_MODE_BASIC, allstar_data,
@@ -291,8 +286,17 @@ void Q1IntHandler(void)
     else if(customResponseSet == 1) // data received from UDP is lower priority
     {
         MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, Custom_TX_Buffer,
-                                               (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+                                               (void *)(SSI3_BASE + SSI_O_DR), sizeof(Custom_TX_Buffer));
         customResponseSet = 0;
+    }
+    else if(TX_needs_resetting == 1) // default lowest priority
+    {
+        MAP_uDMAChannelTransferSet(UDMA_CH15_SSI3TX | UDMA_PRI_SELECT, UDMA_MODE_BASIC, TX_Buffer,
+                                       (void *)(SSI3_BASE + SSI_O_DR), sizeof(TX_Buffer));
+    }
+    else
+    {
+        // should be unreachable
     }
 
     // re-enable DMA
