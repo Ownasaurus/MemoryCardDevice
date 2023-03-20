@@ -107,6 +107,13 @@ sys_arch_unprotect(sys_prot_t lev)
 
 #else /* NO_SYS */
 
+u32_t
+sys_now(void)
+{
+    return xTaskGetTickCount() * portTICK_PERIOD_MS;
+}
+
+
 /* A structure to contain the variables for a sys_thread_t. */
 typedef struct {
   void *stackstart;
