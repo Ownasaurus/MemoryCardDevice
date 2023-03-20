@@ -80,14 +80,14 @@ int main(void)
 
     // Create tasks
     BaseType_t creationResult;
-    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
-    ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
-    ASSERT(creationResult == pdPASS);
+    //creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
+    //ASSERT(creationResult == pdPASS);
+    //creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
+    //ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
-    ASSERT(creationResult == pdPASS);
+    //creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
+    //ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -202,6 +202,14 @@ void ethernetTask(void *pvParameters)
     Ethernet_Begin();
     task_print("Ethernet Initialized.\r\n");
 
+    while(true)
+    {
+        if(netif_is_link_up(netif_default))
+            UARTprintf("+++ Ethernet link is up\r\n");
+        else UARTprintf("--- Ethernet link is down\r\n");
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+/*
     //--------Wait until we have our IP-----------
     uint32_t currIp = lwIPLocalIPAddrGet();
     while(currIp == 0xFFFFFFFF || currIp == 0)
@@ -287,7 +295,7 @@ void ethernetTask(void *pvParameters)
     }
 
     udp_remove(pcb_send);
-    udp_remove(pcb_receive);
+    udp_remove(pcb_receive);*/
 }
 
 // Task which queues up an EXI Response
