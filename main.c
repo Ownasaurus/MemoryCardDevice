@@ -206,7 +206,9 @@ void ethernetTask(void *pvParameters)
     uint32_t currIp = lwIPLocalIPAddrGet();
     while(currIp == 0xFFFFFFFF || currIp == 0)
     {
-        task_print("Waiting for IP....\r\n");
+        if(currIp == 0xFFFFFFFF)
+            task_print("Waiting for link....\r\n");
+        else task_print("Waiting for IP....\r\n");
         currIp = lwIPLocalIPAddrGet();
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }

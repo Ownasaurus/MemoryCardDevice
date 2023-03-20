@@ -327,9 +327,9 @@ static void
 lwIPLinkDetect(void)
 {
     bool bHaveLink;
-    struct ip_addr ip_addr;
-    struct ip_addr net_mask;
-    struct ip_addr gw_addr;
+    ip4_addr_t ip_addr;
+    ip4_addr_t net_mask;
+    ip4_addr_t gw_addr;
 
     //
     // See if there is an active link.
@@ -353,9 +353,9 @@ lwIPLinkDetect(void)
     //
     // Clear any address information from the network interface.
     //
-    ip_addr.u_addr.ip4.addr = 0;
-    net_mask.u_addr.ip4.addr = 0;
-    gw_addr.u_addr.ip4.addr = 0;
+    ip_addr.addr = 0;
+    net_mask.addr = 0;
+    gw_addr.addr = 0;
     netif_set_addr(&g_sNetIF, &ip_addr, &net_mask, &gw_addr);
 
     //
