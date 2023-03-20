@@ -104,31 +104,6 @@ void Ethernet_Begin()
     uint8_t pui8MACArray[8];
 
     //
-    // this app wants to configure for ethernet LED function.
-    //
-    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-    MAP_GPIOPinConfigure(GPIO_PF0_EN0LED0); // Causes a Fault Interrupt
-    MAP_GPIOPinConfigure(GPIO_PF4_EN0LED1);
-
-    GPIOPinTypeEthernetLED(GPIO_PORTF_BASE, GPIO_PIN_0 | GPIO_PIN_4);
-
-    //
-    // Configure Port N1 for as an output for the animation LED.
-    //
-    MAP_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
-    MAP_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
-
-    //
-    // Initialize LED to OFF (0)
-    //
-    MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, ~GPIO_PIN_1);
-
-    //
-    // Configure SysTick for a periodic interrupt.
-    //
-    // NOTE: This is already handled by the RTOS
-
-    //
     // Configure the hardware MAC address for Ethernet Controller filtering of
     // incoming packets.  The MAC address will be stored in the non-volatile
     // USER0 and USER1 registers.

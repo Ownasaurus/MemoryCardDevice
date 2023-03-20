@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "utils/lwiplib.h"
+#include "inc/hw_emac.h"
 
 //*****************************************************************************
 //
@@ -350,9 +351,9 @@ lwIPLinkDetect(void)
     //
     // Clear any address information from the network interface.
     //
-    ip_addr.u_addr = 0;
-    net_mask.u_addr = 0;
-    gw_addr.u_addr = 0;
+    ip_addr.u_addr.ip4.addr = 0;
+    net_mask.u_addr.ip4.addr = 0;
+    gw_addr.u_addr.ip4.addr = 0;
     netif_set_addr(&g_sNetIF, &ip_addr, &net_mask, &gw_addr);
 
     //
@@ -1011,7 +1012,7 @@ lwIPLocalIPAddrGet(void)
 #if LWIP_AUTOIP || LWIP_DHCP
     if(g_bLinkActive)
     {
-        return((uint32_t)g_sNetIF.ip_addr.u_addr);
+        return((uint32_t)g_sNetIF.ip_addr.u_addr.ip4.addr);
     }
     else
     {

@@ -40,7 +40,7 @@
 #define LWIP_PROVIDE_ERRNO
 #define LWIP_IPV4                       1
 #define LWIP_IPV6                       1
-#define LWIP_TIMERS                     0
+#define LWIP_TIMERS                     1
 #define TCPIP_MBOX_SIZE                 8
 #define DEFAULT_UDP_RECVMBOX_SIZE       8
 #define DEFAULT_ACCEPTMBOX_SIZE         8
@@ -57,8 +57,12 @@
 #define LWIP_NETBUF_RECVINFO            0
 #define LWIP_HAVE_LOOPIF                1
 
+#define PHY_PHYS_ADDR                   0
+
 /* Enable DHCP to test it, disable UDP checksum to easier inject packets */
-#define LWIP_DHCP                       0
+#define LWIP_DHCP                       1
+
+#define LWIP_AUTOIP                     0
 
 /* Minimal changes to opt.h required for tcp unit tests: */
 #define MEM_SIZE                        16000
