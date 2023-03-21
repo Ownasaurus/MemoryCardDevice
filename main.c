@@ -177,14 +177,6 @@ void ethernetTask(void *pvParameters)
     Ethernet_Begin();
     task_print("Ethernet Initialized.\r\n");
 
-    while(true)
-    {
-        if(netif_is_link_up(netif_default))
-            UARTprintf("+++ Ethernet link is up\r\n");
-        else UARTprintf("--- Ethernet link is down\r\n");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-/*
     //--------Wait until we have our IP-----------
     uint32_t currIp = lwIPLocalIPAddrGet();
     while(currIp == 0xFFFFFFFF || currIp == 0)
@@ -197,6 +189,7 @@ void ethernetTask(void *pvParameters)
     task_print("Obtained IP: ");
     DisplayIPAddress(currIp);
     task_print("\r\n");
+
     //--------------------------------------------
 
     struct udp_pcb *pcb_send, *pcb_receive;
@@ -226,51 +219,30 @@ void ethernetTask(void *pvParameters)
     uint8_t messageReceived[2048];
     uint8_t fullMessageBuffer[2048];
     uint8_t *messagePtr = fullMessageBuffer;
-    uint16_t messageIndex = 0;
+    #define  MSG_SIZE_HERE 160
+    char packet[MSG_SIZE_HERE] = "Hello!";
+    //memcpy(packet, "Hello!", messageSize);
     while(true)
     {
-        size_t sizeReceived = xMessageBufferReceive(outgoingUDPData, &messageReceived, 2048, portMAX_DELAY); // blocks until data is available
-        if(sizeReceived == 0) // nothing was actually received
-        {
-            continue;
-        }
-        else if(sizeReceived == 1) // flush command
-        {
-            if(messageIndex > 0) // make sure we have actual data to send
-            {
-                p = pbuf_alloc(PBUF_TRANSPORT, messageIndex, PBUF_REF);
-                p->payload = fullMessageBuffer;
-                p->len = messageIndex;
-                err_t tempVal = udp_send(pcb_send, p);
-                if(tempVal != ERR_OK)
-                {
-                    task_print("ERROR: Failed to SEND!\r\n");
-                }
-                pbuf_free(p);
-            }
+        if(netif_is_link_up(netif_default))
+            UARTprintf("+++ Ethernet link is up\r\n");
+        else UARTprintf("--- Ethernet link is down\r\n");
+        vTaskDelay(10 / portTICK_PERIOD_MS);
 
-            // reset message position
-            messagePtr = fullMessageBuffer;
-            messageIndex = 0;
-        }
-        else // build up packet data
+        p = pbuf_alloc(PBUF_TRANSPORT, MSG_SIZE_HERE, PBUF_REF);
+        p->payload = packet;
+        p->len = MSG_SIZE_HERE;
+        err_t tempVal = udp_send(pcb_send, p);
+        if(tempVal != ERR_OK)
         {
-            //CHECK FOR OVERFLOW before moving data
-            if(messageIndex + sizeReceived <= 2048)
-            {
-                memcpy(messagePtr, &messageReceived, sizeReceived);
-                messagePtr += sizeReceived;
-                messageIndex += sizeReceived;
-            }
-            else
-            {
-                task_print("ERROR: Overflow averted!\r\n");
-            }
+            task_print("ERROR: Failed to SEND!\r\n");
         }
+        pbuf_free(p);
+
     }
 
     udp_remove(pcb_send);
-    udp_remove(pcb_receive);*/
+    udp_remove(pcb_receive);
 }
 
 // Task which queues up an EXI Response
