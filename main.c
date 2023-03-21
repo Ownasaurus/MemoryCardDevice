@@ -80,14 +80,14 @@ int main(void)
 
     // Create tasks
     BaseType_t creationResult;
-    //creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
-    //ASSERT(creationResult == pdPASS);
-    //creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
-    //ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
+    ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
+    ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
-    //creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
-    //ASSERT(creationResult == pdPASS);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
+    ASSERT(creationResult == pdPASS);
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -221,7 +221,6 @@ void ethernetTask(void *pvParameters)
     uint8_t *messagePtr = fullMessageBuffer;
     #define  MSG_SIZE_HERE 160
     char packet[MSG_SIZE_HERE] = "Hello!";
-    //memcpy(packet, "Hello!", messageSize);
     while(true)
     {
         if(netif_is_link_up(netif_default))
@@ -238,7 +237,6 @@ void ethernetTask(void *pvParameters)
             task_print("ERROR: Failed to SEND!\r\n");
         }
         pbuf_free(p);
-
     }
 
     udp_remove(pcb_send);
