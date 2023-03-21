@@ -21,7 +21,7 @@
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICui32AR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ * MERCHANTABILITY AND FITNESS FOR A PARTICLAR PURPOSE ARE DISCLAIMED. IN NO EVENT
  * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
  * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
@@ -89,7 +89,7 @@
 #endif
 
 /**
- * If necessary, set the defaui32t number of transmit and receive DMA descriptors
+ * If necessary, set the default number of transmit and receive DMA descriptors
  * used by the Ethernet MAC.
  *
  */
@@ -335,7 +335,7 @@ tivaif_hwinit(struct netif *psNetif)
   ui16Val = EMACPHYRead(EMAC0_BASE, PHY_PHYS_ADDR, EPHY_MISR1);
 
   /**
-   * Set MAC filtering options.  We receive all broadcast and mui32ticast
+   * Set MAC filtering options.  We receive all broadcast and multicast
    * packets along with those addressed specifically for us.
    */
   EMACFrameFilterSet(EMAC0_BASE, (EMAC_FRMFILTER_HASH_AND_PERFECT |
@@ -499,8 +499,8 @@ tivaif_check_pbuf(struct pbuf *p)
  *
  * @param psNetif the lwip network interface structure for this ethernetif
  * @param p the MAC packet to send (e.g. IP packet including MAC addresses and type)
- * @return ERR_OK if the packet coui32d be sent
- *         an err_t value if the packet coui32dn't be sent
+ * @return ERR_OK if the packet could be sent
+ *         an err_t value if the packet couldn't be sent
  */
 static err_t
 tivaif_transmit(struct netif *psNetif, struct pbuf *p)
@@ -554,7 +554,7 @@ tivaif_transmit(struct netif *psNetif, struct pbuf *p)
   {
       /**
        * The current write descriptor has a pbuf attached to it so this
-       * implies that the ring is fui32l. Reject this transmit request with a
+       * implies that the ring is full. Reject this transmit request with a
        * memory error since we can't satisfy it just now.
        */
       pbuf_free(p);
