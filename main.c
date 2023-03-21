@@ -263,7 +263,7 @@ void ethernetTask(void *pvParameters)
                 err_t tempVal = udp_send(pcb_send, p);
                 if(tempVal != ERR_OK)
                 {
-                    task_print("ERROR: Failed to SEND!\r\n");
+                    task_print("ERROR: Failed to SEND! (%d)\r\n", tempVal);
                 }
                 pbuf_free(p);
             }
