@@ -90,11 +90,11 @@ int main(void)
     BaseType_t creationResult;
     creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, &heartbeatHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 7168, NULL, 2, &uartHdl);
+    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 1024, NULL, 2, &uartHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, &ethernetHdl);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 2048, NULL, 3, &ethernetHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, &EXIHdl);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 2048, NULL, 4, &EXIHdl);
     ASSERT(creationResult == pdPASS);
 #if INCLUDE_uxTaskGetStackHighWaterMark
     creationResult = xTaskCreate(stackSampleTask, (const portCHAR *)"STKSAMPLE", 1024, NULL, 1, NULL);
