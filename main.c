@@ -409,11 +409,14 @@ void stackSampleTask(void *pvParameters)
         { NULL, NULL },
     };
     UBaseType_t stackWatermark;
+    size_t heapWatermark;
 
     while (true) {
         // Sample the stack higher watermarks of all tasks
         vTaskDelay(10000 / portTICK_PERIOD_MS);
 
+        heapWatermark = xPortGetMinimumEverFreeHeapSize();
+        task_print("Peak heap usage: %u / %u (%u bytes remaining)\r\n", configTOTAL_HEAP_SIZE - heapWatermark, configTOTAL_HEAP_SIZE, heapWatermark);
         for (const struct taskdef *td = &taskdefs[0]; td->name != NULL; td++) {
             stackWatermark = uxTaskGetStackHighWaterMark(td->hdl);
 
