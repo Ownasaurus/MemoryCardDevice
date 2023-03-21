@@ -14,6 +14,8 @@ This README should be updated in the near future.
 
 @ChrisPVille - Help, direction, debugging, advice, and more. this would not have happened without his support.
 
-@rasteri - Getting ping-pong buffers working
+@rasteri - Getting ping-pong buffers working.
 
 @altf4 - Lots of testing!
+
+@kevans91 - Help analyzing and optimizing stack and heap usage.
