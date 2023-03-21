@@ -41,6 +41,14 @@ void ethernetTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void uart0Task(void *pvParameters);
 void EXISendTask(void *pvParameters);
+#if INCLUDE_uxTaskGetStackHighWaterMark
+void stackSampleTask(void *pvParameters);
+#endif
+
+static TaskHandle_t ethernetHdl;
+static TaskHandle_t heartbeatHdl;
+static TaskHandle_t uartHdl;
+static TaskHandle_t EXIHdl;
 
 // Other function prototypes
 void UART0_Begin();
@@ -80,14 +88,18 @@ int main(void)
 
     // Create tasks
     BaseType_t creationResult;
-    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
+    creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, &heartbeatHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
+    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 1024, NULL, 2, &uartHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 2048, NULL, 3, &ethernetHdl);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
+    creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 2048, NULL, 4, &EXIHdl);
     ASSERT(creationResult == pdPASS);
+#if INCLUDE_uxTaskGetStackHighWaterMark
+    creationResult = xTaskCreate(stackSampleTask, (const portCHAR *)"STKSAMPLE", 1024, NULL, 1, NULL);
+    ASSERT(creationResult == pdPASS);
+#endif
 
     // This should start up all of our tasks and never progress past this line of code
     vTaskStartScheduler();
@@ -242,8 +254,8 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
-    uint8_t messageReceived[2048];
-    uint8_t fullMessageBuffer[2048];
+    static uint8_t messageReceived[2048];
+    static uint8_t fullMessageBuffer[2048];
     uint8_t *messagePtr = fullMessageBuffer;
     uint16_t messageIndex = 0;
     while(true)
@@ -355,7 +367,7 @@ void UART0_Begin()
 // Low priority task which blocks until text is sent to it to print over UART0
 void uart0Task(void *pvParameters)
 {
-    char textToPrint[1024];
+    static char textToPrint[1024];
 
     while(true)
     {
@@ -382,6 +394,41 @@ void heartbeatTask(void *pvParameters)
         //task_print("Free heap: %u\r\n", xPortGetFreeHeapSize());
     }
 }
+
+#if INCLUDE_uxTaskGetStackHighWaterMark
+void stackSampleTask(void *pvParameters)
+{
+    const struct taskdef {
+        const char *name;
+        TaskHandle_t hdl;
+    } taskdefs[] = {
+        { "Ethernet", ethernetHdl },
+        { "Heartbeat", heartbeatHdl },
+        { "uart", uartHdl },
+        { "EXI", EXIHdl },
+        { NULL, NULL },
+    };
+    UBaseType_t stackWatermark;
+    size_t heapWatermark;
+
+    while (true) {
+        // Sample the stack higher watermarks of all tasks
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+        heapWatermark = xPortGetMinimumEverFreeHeapSize();
+        task_print("Peak heap usage: %u / %u (%u bytes remaining)\r\n", configTOTAL_HEAP_SIZE - heapWatermark, configTOTAL_HEAP_SIZE, heapWatermark);
+        for (const struct taskdef *td = &taskdefs[0]; td->name != NULL; td++) {
+            stackWatermark = uxTaskGetStackHighWaterMark(td->hdl);
+
+            if (stackWatermark == 0) {
+                task_print("STACK: %s: OVERFLOW\r\n", td->name);
+            } else {
+                task_print("STACK %s: %u words (%u bytes)\r\n", td->name, stackWatermark, stackWatermark * sizeof(StackType_t));
+            }
+        }
+    }
+}
+#endif
 
 //*****************************************************************************
 //
