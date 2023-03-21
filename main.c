@@ -82,9 +82,9 @@ int main(void)
     BaseType_t creationResult;
     creationResult = xTaskCreate(heartbeatTask, (const portCHAR *)"HB", 1024, NULL, 1, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 8192, NULL, 2, NULL);
+    creationResult = xTaskCreate(uart0Task, (const portCHAR *)"UART0", 7168, NULL, 2, NULL);
     ASSERT(creationResult == pdPASS);
-    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 19456, NULL, 3, NULL);
+    creationResult = xTaskCreate(ethernetTask, (const portCHAR *)"ENET", 8192, NULL, 3, NULL);
     ASSERT(creationResult == pdPASS);
     creationResult = xTaskCreate(EXISendTask, (const portCHAR *)"EXISend", 8192, NULL, 4, NULL);
     ASSERT(creationResult == pdPASS);
@@ -242,8 +242,8 @@ void ethernetTask(void *pvParameters)
     }
     udp_recv(pcb_receive, udp_data_received, NULL);
 
-    uint8_t messageReceived[2048];
-    uint8_t fullMessageBuffer[2048];
+    static uint8_t messageReceived[2048];
+    static uint8_t fullMessageBuffer[2048];
     uint8_t *messagePtr = fullMessageBuffer;
     uint16_t messageIndex = 0;
     while(true)
@@ -355,7 +355,7 @@ void UART0_Begin()
 // Low priority task which blocks until text is sent to it to print over UART0
 void uart0Task(void *pvParameters)
 {
-    char textToPrint[1024];
+    static char textToPrint[1024];
 
     while(true)
     {
