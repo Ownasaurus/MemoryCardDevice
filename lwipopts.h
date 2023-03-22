@@ -87,7 +87,4 @@
 #define LWIP_MEM_ILLEGAL_FREE(msg)      /* to nothing */
 
 
-#define NETIF_DEBUG                     LWIP_DBG_ON
-#define LWIP_DBG_MIN_LEVEL              LWIP_DBG_LEVEL_ALL
-
 #endif /* LWIP_HDR_LWIPOPTS_H */
