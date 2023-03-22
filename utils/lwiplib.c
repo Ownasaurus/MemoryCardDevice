@@ -30,6 +30,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "utils/lwiplib.h"
+#include "inc/hw_emac.h"
+
+#define PHY_PHYS_ADDR 0
 
 //*****************************************************************************
 //
@@ -324,9 +327,9 @@ static void
 lwIPLinkDetect(void)
 {
     bool bHaveLink;
-    struct ip_addr ip_addr;
-    struct ip_addr net_mask;
-    struct ip_addr gw_addr;
+    ip4_addr_t ip_addr;
+    ip4_addr_t net_mask;
+    ip4_addr_t gw_addr;
 
     //
     // See if there is an active link.
@@ -348,12 +351,17 @@ lwIPLinkDetect(void)
     g_bLinkActive = bHaveLink;
 
     //
-    // Clear any address information from the network interface.
+    // Clear any address information from the network interface, if needed.
     //
-    ip_addr.u_addr = 0;
-    net_mask.u_addr = 0;
-    gw_addr.u_addr = 0;
-    netif_set_addr(&g_sNetIF, &ip_addr, &net_mask, &gw_addr);
+#if LWIP_DHCP
+        if(g_ui32IPMode == IPADDR_USE_DHCP)
+        {
+            ip_addr.addr = 0;
+            net_mask.addr = 0;
+            gw_addr.addr = 0;
+            netif_set_addr(&g_sNetIF, &ip_addr, &net_mask, &gw_addr);
+        }
+#endif
 
     //
     // See if there is a link now.
@@ -1011,7 +1019,7 @@ lwIPLocalIPAddrGet(void)
 #if LWIP_AUTOIP || LWIP_DHCP
     if(g_bLinkActive)
     {
-        return((uint32_t)g_sNetIF.ip_addr.u_addr);
+        return((uint32_t)g_sNetIF.ip_addr.u_addr.ip4.addr);
     }
     else
     {

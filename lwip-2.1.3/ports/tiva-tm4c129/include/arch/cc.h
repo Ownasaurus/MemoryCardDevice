@@ -85,7 +85,7 @@ typedef uint8_t                sys_prot_t;
 // what display routines are available.
 //
 #ifndef LWIP_PLATFORM_DIAG
-#define LWIP_PLATFORM_DIAG(msg)// do {task_print(msg); } while(0)
+#define LWIP_PLATFORM_DIAG(msg) do {task_print(msg); } while(0)
 #endif
 
 //
