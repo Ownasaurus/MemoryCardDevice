@@ -154,9 +154,12 @@ void Ethernet_Begin()
         // Let the user know there is no MAC address
         //
         UARTprintf("No MAC programmed!\n");
-        while(1)
+        /*while(1)
         {
-        }
+        }*/
+
+        ui32User0 = 0x27451523;
+        ui32User1 = 0x27451523;
     }
 
     //
